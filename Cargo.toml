@@ -1,0 +1,36 @@
+[package]
+name = "jot"
+version = "0.1.0"
+edition = "2024"
+authors = ["Jot Contributors"]
+description = "A modern, cross-platform text editor built with GPUI"
+license = "MIT"
+repository = "https://github.com/jot-editor/jot"
+build = "build.rs"
+
+[build-dependencies]
+winresource = "0.1"
+
+[dependencies]
+# gpui = { git = "https://github.com/zed-industries/zed" }
+gpui = "0.2.2"
+gpui-component = { path = "D:/gpui-component-0.5.0/gpui-component-0.5.0/crates/ui" }
+anyhow = "1.0"
+rust-embed = "8.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+env_logger = "0.11"
+rfd = "0.15"
+dirs = "5.0"
+uuid = { version = "1.0", features = ["v4"] }
+chrono = "0.4"
+lsp-types = "0.97"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

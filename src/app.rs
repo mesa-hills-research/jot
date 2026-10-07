@@ -1,0 +1,396 @@
+use crate::actions::*;
+use crate::components::{
+    Editor, JotTabBar, JotTitleBar, MenuBar, SearchPanel, SettingsPanel, StatusBar, View,
+    attempt_close_window, close_tab_with_prompt,
+};
+use crate::state::{AppEvent, AppState};
+use gpui::{
+    div, px, App, AppContext, AsyncWindowContext, Context, Entity, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, ParentElement, Render, Styled, Subscription, Window,
+    prelude::FluentBuilder,
+};
+use gpui_component::{
+    ActiveTheme, Root as GpuiRoot, v_flex, WindowExt,
+    input::{Input, InputState},
+};
+
+pub struct JotApp {
+    app_state: Entity<AppState>,
+    title_bar: Entity<JotTitleBar>,
+    tab_bar: Entity<JotTabBar>,
+    editor: Entity<Editor>,
+    status_bar: Entity<StatusBar>,
+    search_panel: Entity<SearchPanel>,
+    settings_panel: Entity<SettingsPanel>,
+    goto_line_input: Entity<InputState>,
+    focus_handle: FocusHandle,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl JotApp {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let app_state = cx.new(|cx| AppState::new(cx));
+
+        let app_state_clone = app_state.clone();
+        window.on_window_should_close(cx, move |window, cx| {
+            attempt_close_window(app_state_clone.clone(), window, cx)
+        });
+
+        let event_subscription =
+            cx.subscribe_in(&app_state, window, |this, _, event, window, cx| {
+                this.handle_app_event(event, window, cx);
+            });
+
+        app_state.update(cx, |state, cx| {
+            state.new_untitled_document(window, cx);
+        });
+
+        let menu_bar = MenuBar::build(app_state.clone(), cx);
+        let title_bar = cx.new(|_| JotTitleBar::new(app_state.clone(), menu_bar));
+        let tab_bar = cx.new(|_| JotTabBar::new(app_state.clone()));
+        let editor = cx.new(|cx| Editor::new(app_state.clone(), window, cx));
+        let status_bar = cx.new(|_| StatusBar::new(app_state.clone()));
+        let search_panel = cx.new(|cx| SearchPanel::new(app_state.clone(), window, cx));
+        let settings_panel = cx.new(|cx| SettingsPanel::new(app_state.clone(), window, cx));
+        let goto_line_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Line number..."));
+        let focus_handle = cx.focus_handle();
+
+        Self {
+            app_state,
+            title_bar,
+            tab_bar,
+            editor,
+            status_bar,
+            search_panel,
+            settings_panel,
+            goto_line_input,
+            focus_handle,
+            _subscriptions: vec![event_subscription],
+        }
+    }
+
+    fn handle_app_event(
+        &mut self,
+        event: &AppEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            AppEvent::SettingsChanged => {
+                self.app_state.update(cx, |state, cx| {
+                    state.apply_settings_to_all_docs(window, cx);
+                });
+            }
+            _ => {}
+        }
+    }
+
+    fn show_goto_line_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let app_state = self.app_state.clone();
+        let goto_line_input = self.goto_line_input.clone();
+
+        goto_line_input.update(cx, |state, cx| {
+            state.set_value("", window, cx);
+        });
+
+        window.open_dialog(cx, move |dialog, _, _| {
+            let app_state_go = app_state.clone();
+            let input_go = goto_line_input.clone();
+
+            dialog
+                .title("Go to Line")
+                .child(div().w(px(240.)).child(Input::new(&goto_line_input)))
+                .confirm()
+                .on_ok(move |_, window, cx| {
+                    let line_str = input_go.read(cx).value().to_string();
+                    if let Ok(line) = line_str.trim().parse::<usize>() {
+                        app_state_go.update(cx, |state, cx| {
+                            state.goto_line(line, window, cx);
+                        });
+                    }
+                    true
+                })
+        });
+    }
+
+    fn trigger_open_file(window: &Window, app_state: Entity<AppState>, cx: &App) {
+        window
+            .spawn(cx, move |cx: &mut AsyncWindowContext| {
+                let mut cx = cx.clone();
+                let app_state = app_state.clone();
+                async move {
+                    let file = rfd::AsyncFileDialog::new()
+                        .add_filter(
+                            "Text Files",
+                            &["txt", "md", "json", "xml", "html", "css", "js"],
+                        )
+                        .add_filter("All Files", &["*"])
+                        .pick_file()
+                        .await;
+
+                    if let Some(file) = file {
+                        let path = file.path().to_path_buf();
+
+                        cx.update(|window, cx| {
+                            app_state.update(cx, |state, cx| {
+                                state.open_file(path, window, cx);
+                            });
+                        })
+                        .ok();
+
+                        let app_state_clone = app_state.clone();
+                        cx.on_next_frame(move |_window, _cx| {
+                            let app_state_inner = app_state_clone.clone();
+                            _window.on_next_frame(move |_window, cx| {
+                                app_state_inner.update(cx, |state, cx| {
+                                    if let Some(doc) = state.active_document() {
+                                        let editor_state = doc.read(cx).editor_state.clone();
+                                        editor_state.update(cx, |_, cx| {
+                                            cx.notify();
+                                        });
+                                    }
+                                });
+                            });
+                        });
+                    }
+                }
+            })
+            .detach();
+    }
+
+    fn trigger_new_from_template(window: &Window, app_state: Entity<AppState>, cx: &App) {
+        window
+            .spawn(cx, move |cx: &mut AsyncWindowContext| {
+                let mut cx = cx.clone();
+                let app_state = app_state.clone();
+                async move {
+                    let file = rfd::AsyncFileDialog::new()
+                        .set_title("Select Template")
+                        .add_filter(
+                            "Text Files",
+                            &["txt", "md", "json", "xml", "html", "css", "js"],
+                        )
+                        .add_filter("All Files", &["*"])
+                        .pick_file()
+                        .await;
+
+                    if let Some(file) = file {
+                        let path = file.path().to_path_buf();
+
+                        cx.update(|window, cx| {
+                            app_state.update(cx, |state, cx| {
+                                state.open_as_template(path, window, cx);
+                            });
+                        })
+                        .ok();
+
+                        let app_state_clone = app_state.clone();
+                        cx.on_next_frame(move |_window, _cx| {
+                            let app_state_inner = app_state_clone.clone();
+                            _window.on_next_frame(move |_window, cx| {
+                                app_state_inner.update(cx, |state, cx| {
+                                    if let Some(doc) = state.active_document() {
+                                        let editor_state = doc.read(cx).editor_state.clone();
+                                        editor_state.update(cx, |_, cx| {
+                                            cx.notify();
+                                        });
+                                    }
+                                });
+                            });
+                        });
+                    }
+                }
+            })
+            .detach();
+    }
+
+    fn trigger_save_as(window: &Window, app_state: Entity<AppState>, cx: &App) {
+        window
+            .spawn(cx, move |cx: &mut AsyncWindowContext| {
+                let mut cx = cx.clone();
+                let app_state = app_state.clone();
+                async move {
+                    let (doc, content) = cx
+                        .update(|_, cx| {
+                            app_state.update(cx, |state, cx| {
+                                if let Some(doc) = state.active_document().cloned() {
+                                    let content = doc.read(cx).content(cx);
+                                    (Some(doc), content)
+                                } else {
+                                    (None, String::new())
+                                }
+                            })
+                        })
+                        .unwrap_or((None, String::new()));
+
+                    let Some(doc) = doc else { return };
+
+                    let file = rfd::AsyncFileDialog::new()
+                        .add_filter("Text Files", &["txt"])
+                        .add_filter("All Files", &["*"])
+                        .set_file_name("untitled.txt")
+                        .save_file()
+                        .await;
+
+                    if let Some(file) = file {
+                        let path = file.path().to_path_buf();
+                        if let Err(e) = std::fs::write(&path, &content) {
+                            log::error!("Failed to save file: {}", e);
+                            return;
+                        }
+
+                        cx.update(|_, cx| {
+                            app_state.update(cx, |state, cx| {
+                                state.document_saved(doc, path, cx);
+                            });
+                        })
+                        .ok();
+                    }
+                }
+            })
+            .detach();
+    }
+
+    fn bind_global_actions(&self, div: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
+        div.key_context(APP_CONTEXT)
+            .on_action(cx.listener(|this, action: &NewTab, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_new_tab(action, window, cx);
+                });
+            }))
+            .on_action(cx.listener(|this, _: &NewFromTemplate, window, cx| {
+                Self::trigger_new_from_template(window, this.app_state.clone(), cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenFile, window, cx| {
+                Self::trigger_open_file(window, this.app_state.clone(), cx);
+            }))
+            .on_action(cx.listener(|this, _: &Save, window, cx| {
+                let app_state = this.app_state.clone();
+
+                let needs_save_as = app_state.update(cx, |state, cx| {
+                    match state.save_active_document(cx) {
+                        Ok(saved) => !saved,
+                        Err(e) => {
+                            log::error!("Save failed: {}", e);
+                            false
+                        }
+                    }
+                });
+
+                if needs_save_as {
+                    Self::trigger_save_as(window, app_state, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SaveAs, window, cx| {
+                Self::trigger_save_as(window, this.app_state.clone(), cx);
+            }))
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
+                let index = this.app_state.read(cx).active_index;
+                close_tab_with_prompt(this.app_state.clone(), index, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                if attempt_close_window(this.app_state.clone(), window, cx) {
+                    window.remove_window();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &Quit, window, cx| {
+                if attempt_close_window(this.app_state.clone(), window, cx) {
+                    window.remove_window();
+                }
+            }))
+            .on_action(cx.listener(|this, action: &ZoomIn, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_zoom_in(action, window, cx);
+                });
+            }))
+            .on_action(cx.listener(|this, action: &ZoomOut, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_zoom_out(action, window, cx);
+                });
+            }))
+            .on_action(cx.listener(|this, action: &ResetZoom, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_reset_zoom(action, window, cx);
+                });
+            }))
+            .on_action(cx.listener(|this, action: &ToggleWordWrap, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_toggle_word_wrap(action, window, cx);
+                });
+            }))
+            .on_action(cx.listener(|this, action: &ToggleLineNumbers, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_toggle_line_numbers(action, window, cx);
+                });
+            }))
+            .on_action(cx.listener(|this, action: &OpenSettings, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_open_settings(action, window, cx);
+                });
+            }))
+            .on_action(cx.listener(|this, action: &Find, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_find(action, window, cx);
+                });
+                this.search_panel.read(cx).focus_search(window, cx);
+            }))
+            .on_action(cx.listener(|this, action: &Replace, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_replace(action, window, cx);
+                });
+                this.search_panel.read(cx).focus_search(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &GoToLine, window, cx| {
+                this.show_goto_line_dialog(window, cx);
+            }))
+            .on_action(cx.listener(|this, action: &NextTab, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_next_tab(action, window, cx);
+                });
+            }))
+            .on_action(cx.listener(|this, action: &PreviousTab, window, cx| {
+                this.app_state.update(cx, |state, cx| {
+                    state.on_previous_tab(action, window, cx);
+                });
+            }))
+    }
+}
+
+impl Focusable for JotApp {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for JotApp {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let current_view = self.app_state.read(cx).current_view;
+
+        v_flex()
+            .id("jot-app")
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .font_family("Work Sans")
+            .child(
+                self.bind_global_actions(div(), cx)
+                    .child(self.title_bar.clone()),
+            )
+            .child(
+                self.bind_global_actions(v_flex(), cx)
+                    .size_full()
+                    .track_focus(&self.focus_handle)
+                    .when(current_view == View::Editor, |this| {
+                        this.child(self.tab_bar.clone())
+                            .child(self.search_panel.clone())
+                            .child(self.editor.clone())
+                            .child(self.status_bar.clone())
+                    })
+                    .when(current_view == View::Settings, |this| {
+                        this.child(self.settings_panel.clone())
+                    }),
+            )
+            .children(GpuiRoot::render_dialog_layer(_window, cx))
+    }
+}
