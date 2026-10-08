@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! Jot - A modern text editor replacement for Notepad
 //!
 //! Built with Rust using GPUI, Jot provides an enjoyable text writing experience
