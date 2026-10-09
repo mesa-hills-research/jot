@@ -13,6 +13,7 @@ pub struct EditorOptions {
     pub line_numbers: bool,
     pub spell_check: bool,
     pub keymap: Keymap,
+    pub smooth_caret: bool,
     pub shared_vocab: Rc<RefCell<SharedVocabulary>>,
     pub autocomplete_enabled: Rc<Cell<bool>>,
 }
@@ -99,6 +100,7 @@ impl Document {
                 .soft_wrap(options.word_wrap)
                 .line_number(options.line_numbers)
                 .keymap(options.keymap)
+                .smooth_caret(options.smooth_caret)
                 .suggestion_provider(completions)
                 .suggestion_options(SuggestionOptions::default().menu(false).inline(true));
             if dictionary.is_loaded() {

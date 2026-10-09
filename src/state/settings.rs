@@ -29,6 +29,8 @@ pub struct Settings {
     pub zoom_level: u32,
     /// The editor's keybinding scheme: `cua`, `emacs` or `vim`.
     pub keymap: Keymap,
+    /// Whether the caret glides to where it moves instead of jumping.
+    pub smooth_caret: bool,
 }
 
 impl Default for Settings {
@@ -47,6 +49,7 @@ impl Default for Settings {
             restore_session: false,
             zoom_level: 100,
             keymap: Keymap::Cua,
+            smooth_caret: false,
         }
     }
 }
@@ -142,6 +145,7 @@ mod tests {
         assert_eq!(settings.theme, "Gruvbox Dark");
         assert!(settings.spell_check);
         assert_eq!(settings.keymap, Keymap::Cua);
+        assert!(!settings.smooth_caret);
         // The family and size become the editor font.
         assert_eq!(settings.editor_font.family(), "JetBrains Mono");
         assert_eq!(settings.editor_font.size(), px(16.));
@@ -174,5 +178,16 @@ mod tests {
         assert!(json.contains(r#""keymap":"vim""#), "{json}");
         let loaded: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.keymap, Keymap::Vim);
+    }
+
+    #[test]
+    fn smooth_caret_round_trips() {
+        let settings = Settings {
+            smooth_caret: true,
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains(r#""smooth_caret":true"#), "{json}");
+        assert!(Settings::from_json(&json).unwrap().smooth_caret);
     }
 }

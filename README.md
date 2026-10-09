@@ -7,6 +7,7 @@ your files stay plain text, and jot helps you write them.
 - Spell checking as you type, with suggestions and Add to Dictionary
 - Word completion that learns from your own writing, stored on your computer
 - Tabs, find and replace, Go to Line, word wrap, line numbers and zoom
+- An optional smooth caret that glides as you type and move around
 - Light and dark color themes
 - New from Template, which starts a new document from any file
 

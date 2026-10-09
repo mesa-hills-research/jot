@@ -270,6 +270,19 @@ impl Render for SettingsPanel {
                             }),
                     )
                     .child(
+                        Checkbox::new("smooth-caret")
+                            .label("Smooth Caret")
+                            .checked(settings.smooth_caret)
+                            .on_click({
+                                let app_state = self.app_state.clone();
+                                move |checked, _, cx| {
+                                    app_state.update(cx, |state, cx| {
+                                        state.set_smooth_caret(*checked, cx);
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
                         Checkbox::new("xml-auto-complete")
                             .label("Auto-complete XML tags")
                             .checked(settings.xml_auto_complete)

@@ -88,6 +88,7 @@ impl AppState {
             line_numbers: self.settings.line_numbers,
             spell_check: self.settings.spell_check,
             keymap: self.settings.keymap,
+            smooth_caret: self.settings.smooth_caret,
             shared_vocab: self.shared_vocabulary.clone(),
             autocomplete_enabled: self.autocomplete_enabled.clone(),
         }
@@ -140,6 +141,17 @@ impl AppState {
         for doc in &self.documents {
             let editor_state = doc.read(cx).editor_state.clone();
             editor_state.update(cx, |state, cx| state.set_keymap(keymap, cx));
+        }
+        cx.notify();
+    }
+
+    /// Turns the smooth caret on or off in every open document, and new ones.
+    pub fn set_smooth_caret(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings.smooth_caret = enabled;
+        self.settings.save();
+        for doc in &self.documents {
+            let editor_state = doc.read(cx).editor_state.clone();
+            editor_state.update(cx, |state, cx| state.set_smooth_caret(enabled, cx));
         }
         cx.notify();
     }
