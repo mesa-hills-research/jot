@@ -30,10 +30,12 @@
 //!
 //! # Suggestion ranking
 //!
-//! Candidates are ranked by edit distance, then first-letter preservation
-//! (typos rarely change the first letter), then case-class agreement (a
-//! lowercase typo prefers lowercase corrections over proper nouns), then
-//! length proximity to the typed word, then alphabetically.
+//! Candidates are ranked by an edit distance weighted for typing mistakes:
+//! doubling or undoubling a letter, swapping two neighbours (two vowels
+//! least, as in "wierd") and confusing two vowels cost less than other edits,
+//! so "mispeled" suggests "misspelled" first. Changing the first letter (typos rarely do) and offering a proper
+//! noun for a lowercase word add to the cost, and a longer shared beginning
+//! and a closer length break ties. The wordlist carries no word frequencies.
 //!
 //! # In the editor
 //!
@@ -68,8 +70,37 @@ const MAX_DICTIONARY_WORD_LEN: usize = 48;
 /// Most replacements offered for a misspelled word.
 const MAX_SUGGESTIONS: usize = 5;
 
-/// Maximum edit distance considered when generating correction suggestions.
-const MAX_EDIT_DISTANCE: usize = 2;
+/// Largest weighted edit distance between a typo and a suggestion.
+const MAX_SUGGESTION_COST: f32 = 2.0;
+
+/// Largest difference in length, in characters, between a typo and a
+/// suggestion.
+const MAX_SUGGESTION_LENGTH_DIFFERENCE: usize = 3;
+
+/// Cost of doubling or undoubling a letter: "untill", "ocured".
+const DOUBLED_LETTER_COST: f32 = 0.4;
+
+/// Cost of swapping two neighbouring letters: "teh", "hte".
+const TRANSPOSITION_COST: f32 = 0.6;
+
+/// Cost of swapping two neighbouring vowels, as in "i before e": "wierd",
+/// "recieve".
+const VOWEL_TRANSPOSITION_COST: f32 = 0.5;
+
+/// Cost of writing one vowel for another: "seperate", "definately".
+const VOWEL_COST: f32 = 0.75;
+
+/// Cost of a missing or extra apostrophe: "dont".
+const APOSTROPHE_COST: f32 = 0.5;
+
+/// Added when a suggestion changes the first letter.
+const FIRST_LETTER_COST: f32 = 0.5;
+
+/// Added when a lowercase word would become a proper noun.
+const CASE_COST: f32 = 0.5;
+
+/// Cost of a suggestion that differs from the word only in case: "english".
+const CASE_ONLY_COST: f32 = 0.3;
 
 /// Documents larger than this are not spell checked.
 const MAX_SPELL_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
@@ -319,10 +350,8 @@ impl Dictionary {
         false
     }
 
-    /// Generates up to `limit` correction suggestions for a misspelled word.
-    ///
-    /// Ranking key, in priority order: edit distance, first-letter
-    /// preservation, case-class agreement, length proximity, alphabetical.
+    /// Generates up to `limit` correction suggestions for a misspelled word,
+    /// best first. See the module docs for the ranking.
     pub fn suggest(&self, word: &str, limit: usize) -> Vec<String> {
         if !self.loaded || word.is_empty() || limit == 0 {
             return Vec::new();
@@ -336,13 +365,10 @@ impl Dictionary {
         let target_is_lowercase = word.chars().all(|c| !c.is_uppercase());
 
         let words = self.words.borrow();
-        // (edit distance, first letter differs, case differs, length difference)
-        type RankKey = (usize, u8, u8, usize);
-        let mut matches: Vec<(RankKey, &str)> = Vec::new();
+        let mut matches: Vec<(f32, &str)> = Vec::new();
         for cand in words.iter() {
             let cand_len = cand.chars().count();
-            let len_diff = cand_len.abs_diff(target.len());
-            if len_diff > MAX_EDIT_DISTANCE {
+            if cand_len.abs_diff(target.len()) > MAX_SUGGESTION_LENGTH_DIFFERENCE {
                 continue;
             }
             let cand_first = cand.chars().next().map(|c| c.to_ascii_lowercase());
@@ -351,24 +377,46 @@ impl Dictionary {
                 continue;
             }
             let cand_chars: Vec<char> = cand.to_lowercase().chars().collect();
-            let Some(d) = bounded_osa_distance(&target, &cand_chars, MAX_EDIT_DISTANCE) else {
+            let Some(mut cost) = typo_distance(&target, &cand_chars, MAX_SUGGESTION_COST) else {
                 continue;
             };
-            if d == 0 {
-                continue;
+            if cost == 0.0 {
+                if cand.as_ref() == word {
+                    continue;
+                }
+                cost = CASE_ONLY_COST;
             }
-            let first_mismatch = (cand_first != first) as u8;
-            let case_mismatch =
-                (target_is_lowercase && cand.chars().any(|c| c.is_uppercase())) as u8;
-            matches.push(((d, first_mismatch, case_mismatch, len_diff), cand.as_ref()));
+            if cand_first != first {
+                cost += FIRST_LETTER_COST;
+            }
+            if target_is_lowercase && cand.chars().any(|c| c.is_uppercase()) {
+                cost += CASE_COST;
+            }
+            // Tie-breaks, each smaller than any edit: a longer shared
+            // beginning and a closer length.
+            let shared_prefix = target
+                .iter()
+                .zip(&cand_chars)
+                .take_while(|(a, b)| a == b)
+                .count()
+                .min(4);
+            cost -= 0.02 * shared_prefix as f32;
+            cost += 0.03 * cand_len.abs_diff(target.len()) as f32;
+            matches.push((cost, cand.as_ref()));
         }
 
-        matches.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
-        matches.truncate(limit);
-        matches
-            .into_iter()
-            .map(|(_, w)| match_case(word, w))
-            .collect()
+        matches.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+        let mut suggestions: Vec<String> = Vec::with_capacity(limit);
+        for (_, candidate) in matches {
+            let suggestion = match_case(word, candidate);
+            if !suggestions.contains(&suggestion) {
+                suggestions.push(suggestion);
+            }
+            if suggestions.len() == limit {
+                break;
+            }
+        }
+        suggestions
     }
 }
 
@@ -699,25 +747,65 @@ fn starts_sentence(chars: &[(usize, char)], raw_start: usize) -> bool {
     true
 }
 
-/// Optimal string alignment (restricted Damerau-Levenshtein) distance with a
-/// cutoff. Returns `None` as soon as the distance provably exceeds `max`.
-fn bounded_osa_distance(a: &[char], b: &[char], max: usize) -> Option<usize> {
-    if a.len().abs_diff(b.len()) > max {
-        return None;
+fn is_vowel(c: char) -> bool {
+    matches!(c, 'a' | 'e' | 'i' | 'o' | 'u')
+}
+
+/// Cost of the character at `ix` (1-based) of `word` being missing from the
+/// other word: cheap when it doubles the letter before it, or is an
+/// apostrophe.
+fn gap_cost(word: &[char], ix: usize) -> f32 {
+    let c = word[ix - 1];
+    if c == '\'' || c == '\u{2019}' {
+        APOSTROPHE_COST
+    } else if ix >= 2 && word[ix - 2] == c {
+        DOUBLED_LETTER_COST
+    } else {
+        1.0
     }
+}
+
+fn substitution_cost(a: char, b: char) -> f32 {
+    if a == b {
+        0.0
+    } else if is_vowel(a) && is_vowel(b) {
+        VOWEL_COST
+    } else {
+        1.0
+    }
+}
+
+/// Optimal string alignment (restricted Damerau-Levenshtein) distance with
+/// costs weighted for typing mistakes, from typed `a` to candidate `b`.
+/// Returns `None` as soon as the distance provably exceeds `max`.
+fn typo_distance(a: &[char], b: &[char], max: f32) -> Option<f32> {
     let n = b.len();
-    let mut prev2: Vec<usize> = vec![0; n + 1];
-    let mut prev: Vec<usize> = (0..=n).collect();
-    let mut cur: Vec<usize> = vec![0; n + 1];
+    let mut prev2: Vec<f32> = vec![0.0; n + 1];
+    let mut prev: Vec<f32> = vec![0.0; n + 1];
+    for j in 1..=n {
+        prev[j] = prev[j - 1] + gap_cost(b, j);
+    }
+    let mut cur: Vec<f32> = vec![0.0; n + 1];
 
     for i in 1..=a.len() {
-        cur[0] = i;
+        cur[0] = prev[0] + gap_cost(a, i);
         let mut row_min = cur[0];
         for j in 1..=n {
-            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            let mut v = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
-            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
-                v = v.min(prev2[j - 2] + 1);
+            let mut v = (prev[j] + gap_cost(a, i))
+                .min(cur[j - 1] + gap_cost(b, j))
+                .min(prev[j - 1] + substitution_cost(a[i - 1], b[j - 1]));
+            if i > 1
+                && j > 1
+                && a[i - 1] != a[i - 2]
+                && a[i - 1] == b[j - 2]
+                && a[i - 2] == b[j - 1]
+            {
+                let cost = if is_vowel(a[i - 1]) && is_vowel(a[i - 2]) {
+                    VOWEL_TRANSPOSITION_COST
+                } else {
+                    TRANSPOSITION_COST
+                };
+                v = v.min(prev2[j - 2] + cost);
             }
             cur[j] = v;
             row_min = row_min.min(v);
@@ -730,7 +818,7 @@ fn bounded_osa_distance(a: &[char], b: &[char], max: usize) -> Option<usize> {
     }
 
     let d = prev[n];
-    if d <= max { Some(d) } else { None }
+    (d <= max).then_some(d)
 }
 
 /// Adjusts a suggestion's casing to match the shape of the source word.
@@ -768,6 +856,48 @@ mod tests {
         let dictionary = Dictionary::from_wordlists([words.as_str()]);
         assert!(dictionary.is_loaded());
         dictionary
+    }
+
+    #[test]
+    fn common_typos_suggest_the_intended_word_first() {
+        let dictionary = dictionary();
+        for (typo, intended) in [
+            ("mispeled", "misspelled"),
+            ("teh", "the"),
+            ("recieve", "receive"),
+            ("seperate", "separate"),
+            ("occured", "occurred"),
+            ("definately", "definitely"),
+            ("accomodate", "accommodate"),
+            ("untill", "until"),
+            ("wierd", "weird"),
+            ("becuase", "because"),
+            ("adress", "address"),
+            ("tommorow", "tomorrow"),
+            ("Teh", "The"),
+        ] {
+            let suggestions = dictionary.suggest(typo, MAX_SUGGESTIONS);
+            assert_eq!(
+                suggestions.first().map(String::as_str),
+                Some(intended),
+                "{typo}: {suggestions:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn doubled_letters_and_swaps_cost_less_than_other_edits() {
+        let chars = |s: &str| s.chars().collect::<Vec<_>>();
+        let cost = |a: &str, b: &str| typo_distance(&chars(a), &chars(b), 3.0).unwrap();
+        assert_eq!(cost("untill", "until"), DOUBLED_LETTER_COST);
+        assert_eq!(cost("teh", "the"), TRANSPOSITION_COST);
+        assert_eq!(cost("wierd", "weird"), VOWEL_TRANSPOSITION_COST);
+        assert_eq!(cost("seperate", "separate"), VOWEL_COST);
+        assert_eq!(cost("cat", "cut"), VOWEL_COST);
+        assert_eq!(cost("cat", "cot"), VOWEL_COST);
+        assert_eq!(cost("cat", "bat"), 1.0);
+        assert_eq!(cost("dont", "don't"), APOSTROPHE_COST);
+        assert!(typo_distance(&chars("abc"), &chars("xyz"), 2.0).is_none());
     }
 
     #[test]
