@@ -41,7 +41,7 @@
 //!
 //! This state lives in memory for the session.
 
-use super::{extract_prefix, is_word_char, previous_two_words};
+use super::{extract_prefix, previous_two_words, word_end};
 use gpui_kit::component::input::{SuggestionEvent, TextChange};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cell::{Cell, RefCell};
@@ -194,14 +194,12 @@ struct Offer {
 impl Offer {
     /// The offer that `suggestion`, shown at `offset` in `text`, makes.
     fn new(text: &str, offset: usize, suggestion: &str) -> Option<Self> {
-        let rest: String = suggestion
-            .chars()
-            .take_while(|&character| is_word_char(character))
-            .collect();
+        let prefix = extract_prefix(text, offset);
+        let word = format!("{prefix}{suggestion}");
+        let rest = word[prefix.len()..word_end(&word, 0)].to_string();
         if rest.is_empty() {
             return None;
         }
-        let prefix = extract_prefix(text, offset);
         let lead = if prefix.is_empty() {
             format!("{} ", previous_two_words(text, offset).0?)
         } else {
@@ -511,6 +509,16 @@ mod tests {
         assert_eq!((offer.caret, offer.rest.as_str()), (4, "o"));
         assert_eq!(offer.ghost, "o world");
         assert!(!offer.is_continued_by("o"));
+    }
+
+    #[test]
+    fn an_offer_continues_through_a_contraction() {
+        let mut offer = Offer::new("I do", 4, "n't know").unwrap();
+        assert_eq!((offer.word.as_str(), offer.rest.as_str()), ("don't", "n't"));
+        assert!(offer.is_continued_by("n"));
+        offer.advance("n");
+        assert!(offer.is_continued_by("'"));
+        assert!(!offer.is_continued_by("'t"), "that finishes the word");
     }
 
     #[test]

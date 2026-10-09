@@ -603,3 +603,20 @@ fn a_sentence_is_learned_once(cx: &mut TestAppContext) {
         assert_eq!((count(&reopened, "know"), count(&reopened, "So")), (2, 1));
     }
 }
+
+/// A contraction is one word, with either apostrophe: "don't" is learned
+/// whole, completed whole, and predicts what follows it.
+#[gpui_kit::test]
+fn contractions_are_one_word(cx: &mut TestAppContext) {
+    let mut jot = Jot::with_vocabulary(cx, AutocompleteMode::Eager, SharedVocabulary::new());
+    for _ in 0..6 {
+        jot.type_text("I don't know what to do. We’ll see. ");
+    }
+    assert_eq!((count(&jot, "don't"), count(&jot, "We’ll")), (6, 6));
+    assert_eq!((count(&jot, "don"), count(&jot, "ll")), (0, 0));
+
+    jot.type_text("I don't k");
+    assert_eq!(jot.ghost().as_deref(), Some("now what to"));
+    jot.type_text("now. I d");
+    assert_eq!(jot.ghost().as_deref(), Some("on't know what"));
+}

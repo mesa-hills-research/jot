@@ -667,6 +667,33 @@ fn is_word_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_' || ch == '-'
 }
 
+/// Whether the character `ch` at byte `index` of `text` belongs to a word: a
+/// word character, or an apostrophe between two letters, so contractions and
+/// possessives ("don't", "I'm", "Sam's") stay one word. The typographic
+/// apostrophe counts too.
+fn is_word_char_at(text: &str, index: usize, ch: char) -> bool {
+    if is_word_char(ch) {
+        return true;
+    }
+    (ch == '\'' || ch == '\u{2019}')
+        && text[..index]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphabetic)
+        && text[index + ch.len_utf8()..]
+            .chars()
+            .next()
+            .is_some_and(char::is_alphabetic)
+}
+
+/// The end of the word that starts at byte `start` of `text`.
+fn word_end(text: &str, start: usize) -> usize {
+    text[start..]
+        .char_indices()
+        .find(|&(index, character)| !is_word_char_at(text, start + index, character))
+        .map_or(text.len(), |(index, _)| start + index)
+}
+
 fn is_sentence_terminator(ch: char) -> bool {
     ch == '.' || ch == '!' || ch == '?' || ch == '\n'
 }
@@ -708,7 +735,7 @@ fn extract_sentences_and_words(text: &str, cursor_offset: Option<usize>) -> Vec<
     let mut word_start = None;
 
     for (index, character) in text.char_indices() {
-        if is_word_char(character) {
+        if is_word_char_at(text, index, character) {
             if word_start.is_none() {
                 word_start = Some(index);
             }
@@ -761,7 +788,7 @@ fn extract_prefix(text: &str, offset: usize) -> &str {
     let start = before
         .char_indices()
         .rev()
-        .take_while(|&(_, character)| is_word_char(character))
+        .take_while(|&(index, character)| is_word_char_at(before, index, character))
         .last()
         .map(|(index, _)| index)
         .unwrap_or(offset);
@@ -797,7 +824,7 @@ fn previous_two_words(text: &str, from: usize) -> (Option<&str>, Option<&str>) {
     let mut current = None;
 
     for (index, character) in area.char_indices() {
-        if is_word_char(character) {
+        if is_word_char_at(area, index, character) {
             if current.is_none() {
                 current = Some(index);
             }
