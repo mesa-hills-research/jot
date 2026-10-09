@@ -174,9 +174,11 @@ impl Render for SettingsPanel {
                     )
                     .child(Button::new("back").ghost().icon(IconName::Close).on_click({
                         let app_state = self.app_state.clone();
-                        move |_, _, cx| {
+                        move |_, window, cx| {
                             app_state.update(cx, |state, cx| {
                                 state.show_editor(cx);
+                                // Typing and shortcuts go to the document again.
+                                state.focus_active_editor(window, cx);
                             });
                         }
                     })),

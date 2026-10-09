@@ -358,6 +358,14 @@ impl AppState {
         cx.notify();
     }
 
+    /// Moves keyboard focus to the active document.
+    pub fn focus_active_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(doc) = self.active_document() {
+            let editor_state = doc.read(cx).editor_state.clone();
+            editor_state.update(cx, |state, cx| state.focus(window, cx));
+        }
+    }
+
     pub fn show_editor(&mut self, cx: &mut Context<Self>) {
         self.current_view = View::Editor;
         cx.emit(AppEvent::ViewChanged(View::Editor));
