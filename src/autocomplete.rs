@@ -1078,14 +1078,20 @@ pub(crate) fn line_code_score(line: &str) -> f64 {
     let mut symbols = 0;
     let mut nonspace = 0;
 
-    for character in stripped.chars() {
+    let mut characters = stripped.chars().peekable();
+    while let Some(character) = characters.next() {
         if character.is_whitespace() {
             continue;
         }
 
         nonspace += 1;
 
-        if is_code_symbol(character) {
+        // A colon before a space is prose punctuation, as in "Agenda: budget,
+        // hiring". Code puts one before a space too, in a type or a key, but
+        // has other symbols to tell it by.
+        let prose_colon =
+            character == ':' && characters.peek().is_some_and(|next| next.is_whitespace());
+        if is_code_symbol(character) && !prose_colon {
             symbols += 1;
         }
     }

@@ -620,3 +620,29 @@ fn contractions_are_one_word(cx: &mut TestAppContext) {
     jot.type_text("now. I d");
     assert_eq!(jot.ghost().as_deref(), Some("on't know what"));
 }
+
+/// A note with a colon in it reads as prose, while code with colons in it
+/// stays code.
+#[test]
+fn a_colon_before_a_space_reads_as_prose() {
+    use super::{TextContext, classify_context};
+    for line in [
+        "Pick up groceries: eggs, milk, bread",
+        "Call Mom re: Thanksgiving plans",
+        "Notes 10/12: ask about PTO, send the invoice",
+    ] {
+        assert!(
+            classify_context(line, line.len()) == TextContext::Prose,
+            "{line}"
+        );
+    }
+    for code in [
+        "fn shift(range: Range<usize>, new_len: usize) -> usize {\n    let end: usize = range.end;",
+        "def area(width: int, height: int) -> int:\n    return {\"width\": width}",
+    ] {
+        assert!(
+            classify_context(code, code.len()) == TextContext::Code,
+            "{code}"
+        );
+    }
+}
