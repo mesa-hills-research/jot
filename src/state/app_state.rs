@@ -2,6 +2,7 @@ use super::{Document, Settings};
 use crate::actions::*;
 use crate::autocomplete::SharedVocabulary;
 use crate::components::View;
+use crate::spell::Dictionary;
 use gpui_kit::component::WindowExt;
 use gpui_kit::component::input::Position;
 use gpui_kit::{
@@ -80,19 +81,28 @@ impl AppState {
         }
     }
 
-    /// Updates the spell-check setting and re-runs (or clears) diagnostics
-    /// on every open document.
+    /// Updates the spell-check setting and re-runs (or clears) the
+    /// underlines on every open document.
     pub fn set_spell_check(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.settings.spell_check = enabled;
         self.spell_check_enabled.set(enabled);
         self.settings.save();
+        self.recheck_spelling(cx);
+    }
 
+    /// Checks every open document again, after the dictionary changed.
+    pub fn recheck_spelling(&mut self, cx: &mut Context<Self>) {
         for doc in &self.documents {
             doc.update(cx, |doc, cx| {
                 doc.schedule_spell_check(cx);
             });
         }
         cx.notify();
+    }
+
+    /// The dictionary every document checks against.
+    pub fn dictionary(&self) -> Rc<Dictionary> {
+        self.shared_vocabulary.borrow().dictionary()
     }
 
     pub fn new_untitled_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {

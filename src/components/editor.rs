@@ -1,3 +1,4 @@
+use crate::spell_editor;
 use crate::state::{AppEvent, AppState};
 use gpui_kit::component::{
     ActiveTheme,
@@ -211,27 +212,19 @@ impl Editor {
 
 impl Render for Editor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (font_size, font_family, editor_state, _doc_id) = {
+        let (font_size, font_family, document) = {
             let state = self.app_state.read(cx);
             let settings = &state.settings;
-
-            let (editor_state, doc_id) = if let Some(doc) = state.active_document() {
-                let doc = doc.read(cx);
-                (Some(doc.editor_state.clone()), Some(doc.id))
-            } else {
-                (None, None)
-            };
-
             (
                 settings.effective_font_size(),
                 settings.font_family.clone(),
-                editor_state,
-                doc_id,
+                state.active_document().cloned(),
             )
         };
 
-        if let Some(editor_state) = editor_state {
-            div()
+        if let Some(document) = document {
+            let editor_state = document.read(cx).editor_state.clone();
+            spell_editor::on_spelling_actions(div(), &self.app_state)
                 .flex_1()
                 .size_full()
                 .bg(cx.theme().background)
@@ -243,6 +236,7 @@ impl Render for Editor {
                         .appearance(false)
                         .font_family(font_family)
                         .text_size(px(font_size))
+                        .context_menu(spell_editor::context_menu(document))
                         .h_full()
                         .w_full(),
                 )

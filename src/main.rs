@@ -11,7 +11,7 @@ mod assets;
 mod autocomplete;
 mod components;
 mod spell;
-mod spell_actions;
+mod spell_editor;
 mod state;
 mod theme;
 

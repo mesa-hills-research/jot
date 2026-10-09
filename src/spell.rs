@@ -10,8 +10,9 @@
 //! not loaded and every correctness query answers permissively.
 //!
 //! Words may be added at runtime via [`Dictionary::add_word`], which also
-//! appends them to the user dictionary file and bumps a generation counter
-//! so scanners know to drop caches computed against the old dictionary.
+//! appends them to the user dictionary file, or ignored until jot closes via
+//! [`Dictionary::ignore_word`]. Both bump a generation counter so scanners
+//! know to drop caches computed against the old dictionary.
 //!
 //! # Scanner
 //!
@@ -26,8 +27,6 @@
 //! - Token rules follow a safe bias: identifiers, ALL-CAPS, camelCase,
 //!   digit-adjacent tokens, paths, URLs, inline-code and tag-adjacent tokens
 //!   are skipped rather than risk false squiggles.
-//! - Suggestions are computed once per unique line content and rationed per
-//!   scan so large pastes cannot stall the UI.
 //!
 //! # Suggestion ranking
 //!
@@ -77,18 +76,14 @@ const LINE_CODE_SKIP_SCORE: f64 = 0.5;
 /// A line whose neighborhood-smoothed code score exceeds this is skipped.
 const SMOOTHED_CODE_SKIP_SCORE: f64 = 0.1;
 
-/// Maximum number of correction suggestions attached to one misspelling.
-const MAX_SUGGESTIONS: usize = 3;
-
-/// Maximum number of fresh suggestion computations per scan.
-const SUGGESTION_BUDGET_PER_SCAN: usize = 40;
-
 /// An in-memory spelling dictionary backed by a plain wordlist.
 ///
 /// Interior mutability allows runtime additions ("Add to dictionary") while
 /// the dictionary is shared behind `Rc` across documents and providers.
 pub struct Dictionary {
     words: RefCell<HashSet<Box<str>>>,
+    /// Words accepted until jot closes, in lower case.
+    ignored: RefCell<HashSet<Box<str>>>,
     loaded: bool,
     has_apostrophe_entries: Cell<bool>,
     generation: Cell<u64>,
@@ -99,6 +94,7 @@ impl Dictionary {
     pub fn empty() -> Self {
         Self {
             words: RefCell::new(HashSet::new()),
+            ignored: RefCell::new(HashSet::new()),
             loaded: false,
             has_apostrophe_entries: Cell::new(false),
             generation: Cell::new(0),
@@ -138,6 +134,7 @@ impl Dictionary {
 
         Self {
             words: RefCell::new(words),
+            ignored: RefCell::new(HashSet::new()),
             loaded,
             has_apostrophe_entries: Cell::new(has_apostrophe_entries),
             generation: Cell::new(0),
@@ -237,6 +234,18 @@ impl Dictionary {
         }
     }
 
+    /// Accepts `word`, in any case, until jot closes, without saving it.
+    /// Bumps the generation like [`Dictionary::add_word`].
+    pub fn ignore_word(&self, word: &str) {
+        let word = word.trim().to_lowercase();
+        if word.is_empty() {
+            return;
+        }
+        if self.ignored.borrow_mut().insert(Box::from(word)) {
+            self.generation.set(self.generation.get() + 1);
+        }
+    }
+
     /// Checks whether a word is spelled correctly.
     ///
     /// Returns `true` when no dictionary is loaded so callers degrade
@@ -246,6 +255,12 @@ impl Dictionary {
     pub fn is_correct(&self, word: &str) -> bool {
         if !self.loaded || word.is_empty() {
             return true;
+        }
+        {
+            let ignored = self.ignored.borrow();
+            if !ignored.is_empty() && ignored.contains(word.to_lowercase().as_str()) {
+                return true;
+            }
         }
         let normalized: Cow<'_, str> = if word.contains('\u{2019}') {
             Cow::Owned(word.replace('\u{2019}', "'"))
@@ -345,8 +360,6 @@ pub struct SpellIssue {
     pub line: u32,
     pub start_character: u32,
     pub end_character: u32,
-    pub word: String,
-    pub suggestions: Vec<String>,
 }
 
 /// A misspelling within a single line, cached by line content.
@@ -354,8 +367,6 @@ pub struct SpellIssue {
 struct Misspelling {
     start_character: u32,
     end_character: u32,
-    word: String,
-    suggestions: Vec<String>,
 }
 
 /// Cached analysis for one unique line content.
@@ -432,7 +443,6 @@ impl SpellScanner {
         }
 
         let mut issues = Vec::new();
-        let mut suggestion_budget = SUGGESTION_BUDGET_PER_SCAN;
         let mut in_fence = false;
 
         for (row, record) in rows.iter().enumerate() {
@@ -453,11 +463,7 @@ impl SpellScanner {
             let misspellings = match &entry.misspellings {
                 Some(m) => m.clone(),
                 None => {
-                    let computed = Rc::new(check_line(
-                        dictionary,
-                        &record.content,
-                        &mut suggestion_budget,
-                    ));
+                    let computed = Rc::new(check_line(dictionary, &record.content));
                     entry.misspellings = Some(computed.clone());
                     computed
                 }
@@ -476,8 +482,6 @@ impl SpellScanner {
                     line: row as u32,
                     start_character: m.start_character,
                     end_character: m.end_character,
-                    word: m.word.clone(),
-                    suggestions: m.suggestions.clone(),
                 });
             }
         }
@@ -517,11 +521,7 @@ fn is_token_char(c: char) -> bool {
 }
 
 /// Tokenizes one line and returns its misspellings with char-column spans.
-fn check_line(
-    dictionary: &Dictionary,
-    line: &str,
-    suggestion_budget: &mut usize,
-) -> Vec<Misspelling> {
+fn check_line(dictionary: &Dictionary, line: &str) -> Vec<Misspelling> {
     let mut result = Vec::new();
     if line.len() < MIN_CHECK_TOKEN_CHARS {
         return result;
@@ -537,14 +537,7 @@ fn check_line(
         while ix < chars.len() && is_token_char(chars[ix].1) {
             ix += 1;
         }
-        examine_token(
-            dictionary,
-            &chars,
-            raw_start,
-            ix,
-            suggestion_budget,
-            &mut result,
-        );
+        examine_token(dictionary, &chars, raw_start, ix, &mut result);
     }
     result
 }
@@ -559,7 +552,6 @@ fn examine_token(
     chars: &[(usize, char)],
     raw_start: usize,
     raw_end: usize,
-    suggestion_budget: &mut usize,
     out: &mut Vec<Misspelling>,
 ) {
     let mut start = raw_start;
@@ -640,18 +632,9 @@ fn examine_token(
         return;
     }
 
-    let suggestions = if *suggestion_budget > 0 {
-        *suggestion_budget -= 1;
-        dictionary.suggest(&word, MAX_SUGGESTIONS)
-    } else {
-        Vec::new()
-    };
-
     out.push(Misspelling {
         start_character: start as u32,
         end_character: end as u32,
-        word,
-        suggestions,
     });
 }
 
