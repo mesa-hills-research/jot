@@ -51,6 +51,10 @@ impl Render for JotTitleBar {
         };
 
         TitleBar::new()
+            // One flat color, the theme's. GPUI Kit up to 65c00ad fades the bar
+            // into the window background toward the top, which reads as a
+            // shadow and which Windows dithers into grain.
+            .bg(cx.theme().title_bar)
             // GPUI Kit's Linux close button calls `window.remove_window()`, which
             // skips the close check. This sends it through the check instead.
             // macOS and Windows close through the system.
