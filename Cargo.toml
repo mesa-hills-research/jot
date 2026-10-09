@@ -25,6 +25,11 @@ rfd = "0.15"
 dirs = "5.0"
 chrono = "0.4"
 
+[dev-dependencies]
+# The same GPUI Kit, with GPUI's test harness for tests that type into a real
+# text editor on a fake clock.
+gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "785776749f6adf80eb50a763b1ef359b72d007db", features = ["test-support"] }
+
 # The gpui crates from Mesa Hills Research's fork, at the rev the pinned GPUI Kit names in its
 # own [patch.crates-io]. Cargo applies only this workspace's patches, so the kit's patch doesn't
 # reach jot. Move the rev with the kit pin.

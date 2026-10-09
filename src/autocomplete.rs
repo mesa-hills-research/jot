@@ -1812,3 +1812,6 @@ impl SuggestionProvider for JotCompletionProvider {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
