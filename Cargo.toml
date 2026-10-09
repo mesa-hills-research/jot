@@ -14,10 +14,7 @@ winresource = "0.1"
 [dependencies]
 # GPUI Kit from Mesa Hills Research's fork. It pins the matching gpui-pre release
 # and re-exports it, so GPUI is `gpui_kit::*` and needs no entry of its own.
-# With `tree-sitter` the kit reads the `highlight` section of jot's themes: the
-# editor colours and the error colour of the spelling underlines. Without it
-# the kit ignores that section.
-gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "308ed002521a5333d5bc93b232e6e4db23458558", features = ["tree-sitter"] }
+gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "57fcfde05942b7bea694b7eaeabb2e60ea131a84" }
 anyhow = "1.0"
 rust-embed = "8.5"
 serde = { version = "1.0", features = ["derive"] }

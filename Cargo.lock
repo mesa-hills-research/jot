@@ -2326,7 +2326,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=308ed002521a5333d5bc93b232e6e4db23458558#308ed002521a5333d5bc93b232e6e4db23458558"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=57fcfde05942b7bea694b7eaeabb2e60ea131a84#57fcfde05942b7bea694b7eaeabb2e60ea131a84"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2366,12 +2366,13 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=308ed002521a5333d5bc93b232e6e4db23458558#308ed002521a5333d5bc93b232e6e4db23458558"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=57fcfde05942b7bea694b7eaeabb2e60ea131a84#57fcfde05942b7bea694b7eaeabb2e60ea131a84"
 dependencies = [
  "anyhow",
  "chrono",
  "core-text",
  "enum-iterator",
+ "fontdb",
  "gpui-base",
  "gpui-component-macros",
  "gpui-kit-assets",
@@ -2402,8 +2403,7 @@ dependencies = [
  "smallvec",
  "smol",
  "tracing",
- "tree-sitter",
- "tree-sitter-json",
+ "ttf-parser",
  "uuid",
  "windows 0.58.0",
 ]
@@ -2411,7 +2411,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=308ed002521a5333d5bc93b232e6e4db23458558#308ed002521a5333d5bc93b232e6e4db23458558"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=57fcfde05942b7bea694b7eaeabb2e60ea131a84#57fcfde05942b7bea694b7eaeabb2e60ea131a84"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2422,7 +2422,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=308ed002521a5333d5bc93b232e6e4db23458558#308ed002521a5333d5bc93b232e6e4db23458558"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=57fcfde05942b7bea694b7eaeabb2e60ea131a84#57fcfde05942b7bea694b7eaeabb2e60ea131a84"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -2435,7 +2435,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=308ed002521a5333d5bc93b232e6e4db23458558#308ed002521a5333d5bc93b232e6e4db23458558"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=57fcfde05942b7bea694b7eaeabb2e60ea131a84#57fcfde05942b7bea694b7eaeabb2e60ea131a84"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -6496,12 +6496,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d08889ec5408683408db66ad89e0e1f93dff55c73a4ccc71c427d5b277ee47e6"
 
 [[package]]
-name = "streaming-iterator"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
-
-[[package]]
 name = "strict-num"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7200,36 +7194,6 @@ dependencies = [
  "tracing-core",
  "tracing-log",
 ]
-
-[[package]]
-name = "tree-sitter"
-version = "0.26.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17ebdd3a5a7e28a1890b876fdbd0c3c0fe0a6336cffaa104f11b9f720c9daa29"
-dependencies = [
- "cc",
- "regex",
- "regex-syntax",
- "serde_json",
- "streaming-iterator",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-json"
-version = "0.24.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d727acca406c0020cffc6cf35516764f36c8e3dc4408e5ebe2cb35a947ec471"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-language"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0af592be68c579aa78a16846bd19422978c3c52e438523d45ff5d1bff1f9d4a"
 
 [[package]]
 name = "triomphe"
