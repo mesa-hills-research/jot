@@ -1,11 +1,10 @@
 use crate::state::AppState;
-use gpui::{
-    div, App, AsyncWindowContext, Entity, IntoElement, ParentElement, Styled, Window,
-};
-use gpui_component::{
-    button::{Button, ButtonVariants},
+use gpui_kit::component::{
     WindowExt,
+    button::{Button, ButtonVariants},
+    dialog::DialogFooter,
 };
+use gpui_kit::{App, Entity, ParentElement, Styled, Window, div};
 
 pub fn close_tab_with_prompt(
     app_state: Entity<AppState>,
@@ -125,16 +124,12 @@ fn show_save_dialog_for_tab(
                     .child(format!("Do you want to save changes to {}?", title)),
             )
             .footer({
-                let app_state_footer_cancel = app_state.clone();
-                let app_state_footer_discard = app_state.clone();
-                let app_state_footer_save = app_state.clone();
-                
-                move |_ok, _cancel, _window, _cx| {
-                    let app_state_cancel_click = app_state_footer_cancel.clone();
-                    let app_state_discard_click = app_state_footer_discard.clone();
-                    let app_state_save_click = app_state_footer_save.clone();
-                    
-                    vec![
+                let app_state_cancel_click = app_state.clone();
+                let app_state_discard_click = app_state.clone();
+                let app_state_save_click = app_state.clone();
+
+                DialogFooter::new()
+                    .child(
                         Button::new("cancel")
                             .outline()
                             .label("Cancel")
@@ -143,8 +138,9 @@ fn show_save_dialog_for_tab(
                                     state.is_closing_window = false;
                                 });
                                 window.close_dialog(cx);
-                            })
-                            .into_any_element(),
+                            }),
+                    )
+                    .child(
                         Button::new("dont-save")
                             .outline()
                             .label("Don't Save")
@@ -153,12 +149,18 @@ fn show_save_dialog_for_tab(
                                 app_state_discard_click.update(cx, |state, cx| {
                                     state.force_close_tab(index, window, cx);
                                 });
-                                let is_closing = app_state_discard_click.read(cx).is_closing_window;
+                                let is_closing =
+                                    app_state_discard_click.read(cx).is_closing_window;
                                 if is_closing {
-                                    prompt_next_dirty_tab(app_state_discard_click.clone(), window, cx);
+                                    prompt_next_dirty_tab(
+                                        app_state_discard_click.clone(),
+                                        window,
+                                        cx,
+                                    );
                                 }
-                            })
-                            .into_any_element(),
+                            }),
+                    )
+                    .child(
                         Button::new("save")
                             .primary()
                             .label("Save")
@@ -170,10 +172,8 @@ fn show_save_dialog_for_tab(
                                     index,
                                     cx,
                                 );
-                            })
-                            .into_any_element(),
-                    ]
-                }
+                            }),
+                    )
             })
     });
 }
@@ -185,10 +185,8 @@ fn perform_save_and_close_tab(
     cx: &App,
 ) {
     window
-        .spawn(cx, move |cx: &mut AsyncWindowContext| {
-            let mut cx = cx.clone();
-            let app_state = app_state.clone();
-            async move {
+        .spawn(cx, async move |cx| {
+            {
                 let doc_info = cx
                     .update(|_, cx| {
                         app_state.update(cx, |state, cx| {

@@ -1,9 +1,9 @@
 use crate::state::{AppEvent, AppState};
-use gpui::{
+use gpui_kit::{
     div, px, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
 };
-use gpui_component::{
+use gpui_kit::component::{
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     select::{SearchableVec, Select, SelectEvent, SelectState},
@@ -38,12 +38,12 @@ impl SettingsPanel {
                 if let SelectEvent::Confirm(Some(theme)) = event {
                     let theme_name = theme.clone();
 
-                    if let Some(theme_config) = gpui_component::ThemeRegistry::global(cx)
+                    if let Some(theme_config) = gpui_kit::component::ThemeRegistry::global(cx)
                         .themes()
                         .get(&theme_name)
                         .cloned()
                     {
-                        gpui_component::Theme::global_mut(cx).apply_config(&theme_config);
+                        gpui_kit::component::Theme::global_mut(cx).apply_config(&theme_config);
                     }
 
                     app_state.update(cx, |state, cx| {
@@ -63,7 +63,7 @@ impl SettingsPanel {
     }
 
     fn get_theme_names(cx: &App) -> Vec<SharedString> {
-        let mut theme_names: Vec<SharedString> = gpui_component::ThemeRegistry::global(cx)
+        let mut theme_names: Vec<SharedString> = gpui_kit::component::ThemeRegistry::global(cx)
             .themes()
             .keys()
             .cloned()
@@ -109,7 +109,7 @@ impl Render for SettingsPanel {
                     .child(
                         div()
                             .text_xl()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                             .child("Settings"),
                     )
                     .child(
@@ -133,7 +133,7 @@ impl Render for SettingsPanel {
                     .child(
                         div()
                             .text_lg()
-                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
                             .child("Appearance"),
                     )
                     .child(
@@ -150,7 +150,7 @@ impl Render for SettingsPanel {
                     .child(
                         div()
                             .text_lg()
-                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
                             .child("Editor"),
                     )
                     .child(

@@ -12,9 +12,9 @@ build = "build.rs"
 winresource = "0.1"
 
 [dependencies]
-# gpui = { git = "https://github.com/zed-industries/zed" }
-gpui = "0.2.2"
-gpui-component = { path = "D:/gpui-component-0.5.0/gpui-component-0.5.0/crates/ui" }
+# GPUI Kit from Mesa Hills Research's fork. It pins the matching gpui-pre release
+# and re-exports it, so GPUI is `gpui_kit::*` and needs no entry of its own.
+gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "58718fa85650a32e12296c2bd8a60810d0e7990c" }
 anyhow = "1.0"
 rust-embed = "8.5"
 serde = { version = "1.0", features = ["derive"] }
@@ -27,10 +27,18 @@ uuid = { version = "1.0", features = ["v4"] }
 chrono = "0.4"
 lsp-types = "0.97"
 
-[target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winuser"] }
-
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
+
+# GPUI's layout, text and drawing crates are slow unoptimized. Optimizing them
+# keeps debug builds responsive while jot's own code stays quick to build.
+[profile.dev.package]
+gpui-pre = { opt-level = 3 }
+gpui-pre-sum-tree = { opt-level = 3 }
+resvg = { opt-level = 3 }
+ropey = { opt-level = 3 }
+rustybuzz = { opt-level = 3 }
+taffy = { opt-level = 3 }
+ttf-parser = { opt-level = 3 }

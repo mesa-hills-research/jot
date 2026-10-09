@@ -3,10 +3,10 @@
 use super::JotTab;
 use crate::components::close_tab_with_prompt;
 use crate::state::AppState;
-use gpui::{
+use gpui_kit::{
     div, px, Entity, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
 };
-use gpui_component::{ActiveTheme, Selectable, h_flex};
+use gpui_kit::component::{ActiveTheme, Selectable, h_flex};
 
 /// Tab bar displaying all open documents.
 pub struct JotTabBar {
@@ -20,7 +20,7 @@ impl JotTabBar {
 }
 
 impl Render for JotTabBar {
-    fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut gpui_kit::Context<Self>) -> impl IntoElement {
         let state = self.app_state.read(cx);
         let active_index = state.active_index;
 

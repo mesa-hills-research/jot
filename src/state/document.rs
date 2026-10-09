@@ -1,9 +1,9 @@
 use crate::autocomplete::{JotCompletionProvider, SharedVocabulary};
 use crate::spell::{Dictionary, SpellIssue, SpellScanner, SPELL_CHECK_DEBOUNCE};
 use crate::spell_actions::SpellCodeActionProvider;
-use gpui::{AppContext, Context, Entity, SharedString, Subscription, Task, WeakEntity, Window};
-use gpui_component::highlighter::{Diagnostic, DiagnosticSeverity, Language};
-use gpui_component::input::{InputEvent, InputState, Position, RopeExt};
+use gpui_kit::component::highlighter::{Diagnostic, DiagnosticSeverity};
+use gpui_kit::component::input::{EditorState, InputEvent, Position, RopeExt};
+use gpui_kit::{AppContext, Context, Entity, SharedString, Subscription, Task, WeakEntity, Window};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -18,7 +18,7 @@ pub struct Document {
     pub path: Option<PathBuf>,
     pub title: SharedString,
     pub dirty: bool,
-    pub editor_state: Entity<InputState>,
+    pub editor_state: Entity<EditorState>,
     content_hash: u64,
     dictionary: Rc<Dictionary>,
     spell_enabled: Rc<Cell<bool>>,
@@ -189,13 +189,9 @@ impl Document {
 
     /// Builds the editor state for a document.
     ///
-    /// Documents use the component's code-editor mode with the `Plain`
-    /// ("text") language: it carries no syntax highlighting (empty highlight
-    /// query), but it is the only mode in which gpui-component renders
-    /// diagnostics and honors the line-number setting. `Language::Plain`
-    /// requires either the `tree-sitter-languages` feature or the small
-    /// patch to the vendored `highlighter/languages.rs`; a missing patch
-    /// fails at compile time rather than degrading silently.
+    /// Documents use GPUI Kit's code editor with the plain-text language: no
+    /// syntax highlighting, but it is the editor that draws line numbers and
+    /// the diagnostics that carry the spelling underlines.
     fn build_editor_state(
         document: WeakEntity<Self>,
         content: Option<String>,
@@ -207,22 +203,22 @@ impl Document {
         issues: Rc<RefCell<Vec<SpellIssue>>>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Entity<InputState> {
+    ) -> Entity<EditorState> {
         cx.new(|cx| {
-            let mut state = InputState::new(window, cx)
-                .code_editor(Language::Plain)
+            let mut state = EditorState::new(window, cx)
+                .language("text")
                 .soft_wrap(word_wrap)
                 .line_number(line_numbers)
                 .searchable(true);
             if let Some(content) = content {
                 state = state.default_value(content);
             }
-            state.lsp.completion_provider = Some(Rc::new(JotCompletionProvider::new(
+            state.lsp_mut().completion_provider = Some(Rc::new(JotCompletionProvider::new(
                 shared_vocab,
                 autocomplete_enabled,
             )));
             state
-                .lsp
+                .lsp_mut()
                 .code_action_providers
                 .push(Rc::new(SpellCodeActionProvider::new(
                     document, dictionary, issues,
@@ -237,7 +233,7 @@ impl Document {
     /// edit) so they do not blink out during the debounce window, and a full
     /// re-scan is scheduled.
     fn observe_editor(
-        editor_state: &Entity<InputState>,
+        editor_state: &Entity<EditorState>,
         cx: &mut Context<Self>,
     ) -> Subscription {
         cx.subscribe(editor_state, |this, _, event: &InputEvent, cx| {
@@ -383,11 +379,11 @@ impl Document {
             .with_source("spell")
     }
 
-    pub fn content(&self, cx: &gpui::App) -> String {
+    pub fn content(&self, cx: &gpui_kit::App) -> String {
         self.editor_state.read(cx).value().to_string()
     }
 
-    pub fn check_dirty(&mut self, cx: &gpui::App) {
+    pub fn check_dirty(&mut self, cx: &gpui_kit::App) {
         let current_content = self.content(cx);
         let current_hash = Self::hash_content(&current_content);
 
@@ -398,7 +394,7 @@ impl Document {
         }
     }
 
-    pub fn mark_saved(&mut self, cx: &gpui::App) {
+    pub fn mark_saved(&mut self, cx: &gpui_kit::App) {
         let content = self.content(cx);
         self.content_hash = Self::hash_content(&content);
         self.dirty = false;

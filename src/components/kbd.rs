@@ -1,10 +1,10 @@
 //! Keyboard shortcut display component with keycap styling.
 
-use gpui::{
+use gpui_kit::{
     div, App, IntoElement, Keystroke, ParentElement, RenderOnce,
     SharedString, Styled, Window,
 };
-use gpui_component::ActiveTheme;
+use gpui_kit::component::ActiveTheme;
 
 /// A keyboard shortcut indicator with keycap styling.
 #[derive(IntoElement)]

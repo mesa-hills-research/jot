@@ -1,9 +1,9 @@
 use crate::state::{AppEvent, AppState};
-use gpui::{div, px, Entity, IntoElement, Render, Styled, Subscription, Window, prelude::*};
-use gpui_component::{
-    input::{Input, InputEvent, InputState, Position},
+use gpui_kit::component::{
     ActiveTheme,
+    input::{Editor as EditorElement, EditorState, InputEvent, Position},
 };
+use gpui_kit::{Entity, IntoElement, Render, Styled, Subscription, Window, div, prelude::*, px};
 
 const VOID_ELEMENTS: &[&str] = &[
     "area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -21,7 +21,7 @@ impl Editor {
     pub fn new(
         app_state: Entity<AppState>,
         window: &mut Window,
-        cx: &mut gpui::Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Self {
         let mut editor = Self {
             app_state: app_state.clone(),
@@ -39,7 +39,7 @@ impl Editor {
         &mut self,
         app_state: Entity<AppState>,
         window: &mut Window,
-        cx: &mut gpui::Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         let sub = cx.subscribe_in(&app_state, window, |this, _, event, window, cx| {
             match event {
@@ -55,7 +55,7 @@ impl Editor {
     fn update_active_document_subscription(
         &mut self,
         window: &mut Window,
-        cx: &mut gpui::Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         self.active_doc_subscription = None;
 
@@ -80,10 +80,10 @@ impl Editor {
 
     fn handle_text_change(
         &mut self,
-        editor_state: &Entity<InputState>,
+        editor_state: &Entity<EditorState>,
         app_state: &Entity<AppState>,
         window: &mut Window,
-        cx: &mut gpui::Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         let xml_enabled = app_state.read(cx).settings.xml_auto_complete;
 
@@ -218,7 +218,7 @@ impl Editor {
 }
 
 impl Render for Editor {
-    fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (font_size, font_family, editor_state, _doc_id) = {
             let state = self.app_state.read(cx);
             let settings = &state.settings;
@@ -243,12 +243,14 @@ impl Render for Editor {
                 .flex_1()
                 .size_full()
                 .bg(cx.theme().background)
-                .font_family(font_family)
-                .text_size(px(font_size))
                 .overflow_hidden()
                 .child(
-                    Input::new(&editor_state)
+                    // The editor takes the theme's code font unless told
+                    // otherwise, so the font and zoom go on the element.
+                    EditorElement::new(&editor_state)
                         .appearance(false)
+                        .font_family(font_family)
+                        .text_size(px(font_size))
                         .h_full()
                         .w_full(),
                 )

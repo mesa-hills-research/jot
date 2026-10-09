@@ -21,8 +21,8 @@
 use crate::spell::{Dictionary, SpellIssue};
 use crate::state::Document;
 use anyhow::Result;
-use gpui::{App, Entity, SharedString, Task, WeakEntity, Window};
-use gpui_component::input::{CodeActionProvider, InputState, RopeExt};
+use gpui_kit::component::input::{CodeActionProvider, EditorState, RopeExt};
+use gpui_kit::{App, Entity, SharedString, Task, WeakEntity, Window};
 use lsp_types::{CodeAction, CodeActionKind, Position, TextEdit};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -92,7 +92,7 @@ impl CodeActionProvider for SpellCodeActionProvider {
 
     fn code_actions(
         &self,
-        state: Entity<InputState>,
+        state: Entity<EditorState>,
         range: Range<usize>,
         _window: &mut Window,
         cx: &mut App,
@@ -137,7 +137,7 @@ impl CodeActionProvider for SpellCodeActionProvider {
 
     fn perform_code_action(
         &self,
-        state: Entity<InputState>,
+        state: Entity<EditorState>,
         action: CodeAction,
         _push_to_history: bool,
         window: &mut Window,

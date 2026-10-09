@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::{
     div, px, App, ClickEvent, ElementId, InteractiveElement, IntoElement,
     MouseButton, MouseDownEvent, ParentElement, prelude::FluentBuilder, RenderOnce, SharedString,
     StatefulInteractiveElement, Styled, Window,
 };
-use gpui_component::{ActiveTheme, Icon, IconName, Selectable, h_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Selectable, h_flex};
 use std::rc::Rc;
 
 #[derive(IntoElement)]

@@ -2,12 +2,12 @@ use super::{Document, Settings};
 use crate::actions::*;
 use crate::autocomplete::SharedVocabulary;
 use crate::components::View;
-use gpui::{
+use gpui_kit::component::WindowExt;
+use gpui_kit::component::input::Position;
+use gpui_kit::{
     App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, ParentElement,
     Subscription, Window,
 };
-use gpui_component::input::Position;
-use gpui_component::WindowExt;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;

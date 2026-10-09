@@ -1,7 +1,6 @@
 //! Global actions and keybindings for Jot.
 
-use gpui::{actions, App, KeyBinding};
-use gpui_component::input::Enter as InputEnter;
+use gpui_kit::{App, KeyBinding, actions};
 
 actions!(
     jot,
@@ -72,7 +71,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-,", OpenSettings, Some(APP_CONTEXT)),
         KeyBinding::new("ctrl-tab", NextTab, Some(APP_CONTEXT)),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some(APP_CONTEXT)),
-        KeyBinding::new("shift-enter", InputEnter { secondary: false }, Some("Input")),
     ];
 
     #[cfg(not(target_os = "macos"))]
@@ -105,7 +103,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-,", OpenSettings, Some(APP_CONTEXT)),
         KeyBinding::new("ctrl-tab", NextTab, Some(APP_CONTEXT)),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some(APP_CONTEXT)),
-        KeyBinding::new("shift-enter", InputEnter { secondary: false }, Some("Input")),
     ];
 
     cx.bind_keys(bindings);

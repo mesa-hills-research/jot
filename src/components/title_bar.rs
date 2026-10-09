@@ -2,10 +2,10 @@
 
 use crate::components::MenuBar;
 use crate::state::AppState;
-use gpui::{
+use gpui_kit::{
     div, px, Entity, IntoElement, ParentElement, Render, Styled, Window,
 };
-use gpui_component::{ActiveTheme, TitleBar, h_flex, Icon, Sizable};
+use gpui_kit::component::{ActiveTheme, TitleBar, h_flex, Icon, Sizable};
 
 pub struct JotTitleBar {
     app_state: Entity<AppState>,
@@ -22,7 +22,7 @@ impl JotTitleBar {
 }
 
 impl Render for JotTitleBar {
-    fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut gpui_kit::Context<Self>) -> impl IntoElement {
         let state = self.app_state.read(cx);
         
         let (title_text, is_dirty) = if let Some(doc) = state.active_document() {

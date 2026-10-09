@@ -1,9 +1,9 @@
 use crate::state::AppState;
-use gpui::{
+use gpui_kit::{
     div, px, AppContext, Entity, FocusHandle, Focusable, IntoElement, ParentElement, 
     prelude::FluentBuilder, Render, Styled, Subscription, Window,
 };
-use gpui_component::{
+use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState, Position},
     ActiveTheme, IconName, Sizable, h_flex, v_flex,
@@ -21,7 +21,7 @@ pub struct SearchPanel {
 }
 
 impl SearchPanel {
-    pub fn new(app_state: Entity<AppState>, window: &mut Window, cx: &mut gpui::Context<Self>) -> Self {
+    pub fn new(app_state: Entity<AppState>, window: &mut Window, cx: &mut gpui_kit::Context<Self>) -> Self {
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("Find..."));
         let replace_input = cx.new(|cx| InputState::new(window, cx).placeholder("Replace with..."));
         let focus_handle = cx.focus_handle();
@@ -47,7 +47,7 @@ impl SearchPanel {
         }
     }
 
-    fn perform_search(&mut self, app_state: &Entity<AppState>, cx: &mut gpui::Context<Self>) {
+    fn perform_search(&mut self, app_state: &Entity<AppState>, cx: &mut gpui_kit::Context<Self>) {
         let query = self.search_input.read(cx).value().to_string();
         if query.is_empty() {
             self.match_count = 0;
@@ -67,7 +67,7 @@ impl SearchPanel {
         }
     }
 
-    fn find_next(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+    fn find_next(&mut self, window: &mut Window, cx: &mut gpui_kit::Context<Self>) {
         if self.match_positions.is_empty() {
             return;
         }
@@ -103,7 +103,7 @@ impl SearchPanel {
         }
     }
 
-    fn find_prev(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+    fn find_prev(&mut self, window: &mut Window, cx: &mut gpui_kit::Context<Self>) {
         if self.match_positions.is_empty() {
             return;
         }
@@ -140,7 +140,7 @@ impl SearchPanel {
         }
     }
 
-    fn offset_to_line_col(&self, app_state: &Entity<AppState>, offset: usize, cx: &gpui::App) -> (usize, usize) {
+    fn offset_to_line_col(&self, app_state: &Entity<AppState>, offset: usize, cx: &gpui_kit::App) -> (usize, usize) {
         let state = app_state.read(cx);
         if let Some(doc) = state.active_document() {
             let content = doc.read(cx).content(cx);
@@ -165,7 +165,7 @@ impl SearchPanel {
         (0, 0)
     }
 
-    fn replace_current(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+    fn replace_current(&mut self, window: &mut Window, cx: &mut gpui_kit::Context<Self>) {
         let query = self.search_input.read(cx).value().to_string();
         let replacement = self.replace_input.read(cx).value().to_string();
         
@@ -196,7 +196,7 @@ impl SearchPanel {
         }
     }
 
-    fn replace_all(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+    fn replace_all(&mut self, window: &mut Window, cx: &mut gpui_kit::Context<Self>) {
         let query = self.search_input.read(cx).value().to_string();
         let replacement = self.replace_input.read(cx).value().to_string();
         
@@ -221,20 +221,20 @@ impl SearchPanel {
         }
     }
 
-    pub fn focus_search(&self, window: &mut Window, cx: &gpui::App) {
+    pub fn focus_search(&self, window: &mut Window, cx: &mut gpui_kit::App) {
         let focus_handle = self.search_input.read(cx).focus_handle(cx);
-        focus_handle.focus(window);
+        focus_handle.focus(window, cx);
     }
 }
 
 impl Focusable for SearchPanel {
-    fn focus_handle(&self, _cx: &gpui::App) -> FocusHandle {
+    fn focus_handle(&self, _cx: &gpui_kit::App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
 impl Render for SearchPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut gpui_kit::Context<Self>) -> impl IntoElement {
         let state = self.app_state.read(cx);
 
         if !state.search_visible {

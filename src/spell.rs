@@ -38,9 +38,8 @@
 
 use crate::assets::Assets;
 use crate::autocomplete::line_code_score;
-use gpui::AssetSource;
-use gpui_component::input::{Position, RopeExt};
-use gpui_component::Rope;
+use gpui_kit::AssetSource;
+use gpui_kit::component::input::{Position, Rope, RopeExt};
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;

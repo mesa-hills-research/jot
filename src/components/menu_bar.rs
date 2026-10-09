@@ -1,11 +1,11 @@
 use crate::actions::*;
 use crate::state::AppState;
-use gpui::{
+use gpui_kit::{
     anchored, deferred, div, px, App, AppContext, ClickEvent, Context, DismissEvent, Entity, Focusable,
     InteractiveElement, IntoElement, MouseButton, ParentElement, prelude::FluentBuilder, Render,
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
 };
-use gpui_component::{
+use gpui_kit::component::{
     button::{Button, ButtonVariants},
     menu::PopupMenu,
     Sizable, Selectable,
@@ -112,7 +112,7 @@ impl MenuBar {
 
         self._subscriptions
             .push(cx.subscribe_in(&menu, window, Self::handle_dismiss));
-        menu.read(cx).focus_handle(cx).focus(window);
+        menu.read(cx).focus_handle(cx).focus(window, cx);
 
         menu
     }
@@ -139,7 +139,7 @@ impl MenuBar {
 
         self._subscriptions
             .push(cx.subscribe_in(&menu, window, Self::handle_dismiss));
-        menu.read(cx).focus_handle(cx).focus(window);
+        menu.read(cx).focus_handle(cx).focus(window, cx);
 
         menu
     }
@@ -166,7 +166,7 @@ impl MenuBar {
 
         self._subscriptions
             .push(cx.subscribe_in(&menu, window, Self::handle_dismiss));
-        menu.read(cx).focus_handle(cx).focus(window);
+        menu.read(cx).focus_handle(cx).focus(window, cx);
 
         menu
     }
@@ -184,7 +184,7 @@ impl MenuBar {
 
         self._subscriptions
             .push(cx.subscribe_in(&menu, window, Self::handle_dismiss));
-        menu.read(cx).focus_handle(cx).focus(window);
+        menu.read(cx).focus_handle(cx).focus(window, cx);
 
         menu
     }
@@ -246,7 +246,7 @@ impl MenuBar {
                 this.child(
                     deferred(
                         anchored()
-                            .anchor(gpui::Corner::TopLeft)
+                            .anchor(gpui_kit::Anchor::TopLeft)
                             .snap_to_window_with_margin(px(8.))
                             .child(div().occlude().top_1().child(menu)),
                     ),

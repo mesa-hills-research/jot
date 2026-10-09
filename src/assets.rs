@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use gpui::{AssetSource, SharedString};
+use gpui_kit::{AssetSource, SharedString};
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 
@@ -11,7 +11,7 @@ struct IconAssets;
 #[folder = "fonts"]
 struct FontAssets;
 
-/// Combined asset source that checks multiple embedded folders.
+/// Combined asset source: jot's fonts and icons, then GPUI Kit's icon set.
 pub struct Assets;
 
 impl Assets {
@@ -42,6 +42,10 @@ impl AssetSource for Assets {
             return Ok(Some(data));
         }
 
+        if let Ok(Some(data)) = gpui_kit::assets::Assets.load(path) {
+            return Ok(Some(data));
+        }
+
         Err(anyhow!("Could not find asset at path \"{}\"", path))
     }
 
@@ -53,6 +57,12 @@ impl AssetSource for Assets {
                 .filter(|p| p.starts_with(path))
                 .map(|p| p.into()),
         );
+
+        for kit_path in gpui_kit::assets::Assets.list(path)? {
+            if !results.contains(&kit_path) {
+                results.push(kit_path);
+            }
+        }
 
         let fonts_prefix = "fonts/";
         if path.is_empty() || fonts_prefix.starts_with(path) || path.starts_with(fonts_prefix) {

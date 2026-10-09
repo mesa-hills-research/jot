@@ -4,15 +4,15 @@ use crate::components::{
     attempt_close_window, close_tab_with_prompt,
 };
 use crate::state::{AppEvent, AppState};
-use gpui::{
-    div, px, App, AppContext, AsyncWindowContext, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, Render, Styled, Subscription, Window,
-    prelude::FluentBuilder,
-};
-use gpui_component::{
-    ActiveTheme, Root as GpuiRoot, v_flex, WindowExt,
+use gpui_kit::component::{
+    ActiveTheme, WindowExt,
+    button::{Button, ButtonVariants},
+    dialog::{DialogAction, DialogClose, DialogFooter},
     input::{Input, InputState},
+    v_flex,
 };
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 
 pub struct JotApp {
     app_state: Entity<AppState>,
@@ -101,7 +101,16 @@ impl JotApp {
             dialog
                 .title("Go to Line")
                 .child(div().w(px(240.)).child(Input::new(&goto_line_input)))
-                .confirm()
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new()
+                                .child(Button::new("cancel").outline().label("Cancel")),
+                        )
+                        .child(
+                            DialogAction::new().child(Button::new("ok").primary().label("OK")),
+                        ),
+                )
                 .on_ok(move |_, window, cx| {
                     let line_str = input_go.read(cx).value().to_string();
                     if let Ok(line) = line_str.trim().parse::<usize>() {
@@ -116,10 +125,8 @@ impl JotApp {
 
     fn trigger_open_file(window: &Window, app_state: Entity<AppState>, cx: &App) {
         window
-            .spawn(cx, move |cx: &mut AsyncWindowContext| {
-                let mut cx = cx.clone();
-                let app_state = app_state.clone();
-                async move {
+            .spawn(cx, async move |cx| {
+                {
                     let file = rfd::AsyncFileDialog::new()
                         .add_filter(
                             "Text Files",
@@ -161,10 +168,8 @@ impl JotApp {
 
     fn trigger_new_from_template(window: &Window, app_state: Entity<AppState>, cx: &App) {
         window
-            .spawn(cx, move |cx: &mut AsyncWindowContext| {
-                let mut cx = cx.clone();
-                let app_state = app_state.clone();
-                async move {
+            .spawn(cx, async move |cx| {
+                {
                     let file = rfd::AsyncFileDialog::new()
                         .set_title("Select Template")
                         .add_filter(
@@ -207,10 +212,8 @@ impl JotApp {
 
     fn trigger_save_as(window: &Window, app_state: Entity<AppState>, cx: &App) {
         window
-            .spawn(cx, move |cx: &mut AsyncWindowContext| {
-                let mut cx = cx.clone();
-                let app_state = app_state.clone();
-                async move {
+            .spawn(cx, async move |cx| {
+                {
                     let (doc, content) = cx
                         .update(|_, cx| {
                             app_state.update(cx, |state, cx| {
@@ -252,7 +255,7 @@ impl JotApp {
             .detach();
     }
 
-    fn bind_global_actions(&self, div: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
+    fn bind_global_actions(&self, div: Div, cx: &mut Context<Self>) -> Div {
         div.key_context(APP_CONTEXT)
             .on_action(cx.listener(|this, action: &NewTab, window, cx| {
                 this.app_state.update(cx, |state, cx| {
@@ -333,13 +336,15 @@ impl JotApp {
                 this.app_state.update(cx, |state, cx| {
                     state.on_find(action, window, cx);
                 });
-                this.search_panel.read(cx).focus_search(window, cx);
+                this.search_panel
+                    .update(cx, |panel, cx| panel.focus_search(window, cx));
             }))
             .on_action(cx.listener(|this, action: &Replace, window, cx| {
                 this.app_state.update(cx, |state, cx| {
                     state.on_replace(action, window, cx);
                 });
-                this.search_panel.read(cx).focus_search(window, cx);
+                this.search_panel
+                    .update(cx, |panel, cx| panel.focus_search(window, cx));
             }))
             .on_action(cx.listener(|this, _: &GoToLine, window, cx| {
                 this.show_goto_line_dialog(window, cx);
@@ -391,6 +396,5 @@ impl Render for JotApp {
                         this.child(self.settings_panel.clone())
                     }),
             )
-            .children(GpuiRoot::render_dialog_layer(_window, cx))
     }
 }

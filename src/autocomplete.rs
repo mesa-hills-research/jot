@@ -51,9 +51,8 @@
 //! surface while genuine jargon can earn trust.
 
 use crate::spell::Dictionary;
-use gpui::{Context, Task, Window};
-use gpui_component::input::{CompletionProvider, InputState};
-use gpui_component::Rope;
+use gpui_kit::component::input::{CompletionProvider, Rope};
+use gpui_kit::{App, Task, Window};
 use lsp_types::{
     CompletionContext, CompletionResponse, InlineCompletionContext, InlineCompletionItem,
     InlineCompletionResponse, InsertTextFormat,
@@ -1872,7 +1871,7 @@ impl CompletionProvider for JotCompletionProvider {
         _offset: usize,
         _trigger: CompletionContext,
         _window: &mut Window,
-        _cx: &mut Context<InputState>,
+        _cx: &mut App,
     ) -> Task<anyhow::Result<CompletionResponse>> {
         Task::ready(Ok(CompletionResponse::Array(Vec::new())))
     }
@@ -1881,7 +1880,7 @@ impl CompletionProvider for JotCompletionProvider {
         &self,
         _offset: usize,
         new_text: &str,
-        _cx: &mut Context<InputState>,
+        _cx: &mut App,
     ) -> bool {
         if !self.enabled.get() {
             return false;
@@ -1902,7 +1901,7 @@ impl CompletionProvider for JotCompletionProvider {
         offset: usize,
         _trigger: InlineCompletionContext,
         _window: &mut Window,
-        _cx: &mut Context<InputState>,
+        _cx: &mut App,
     ) -> Task<anyhow::Result<InlineCompletionResponse>> {
         if !self.enabled.get() {
             return Task::ready(Ok(

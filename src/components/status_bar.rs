@@ -1,8 +1,8 @@
 //! Status bar at the bottom of the window.
 
 use crate::state::AppState;
-use gpui::{div, px, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window};
-use gpui_component::{ActiveTheme, h_flex};
+use gpui_kit::{div, px, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window};
+use gpui_kit::component::{ActiveTheme, h_flex};
 
 /// Status bar showing cursor position, zoom level, etc.
 pub struct StatusBar {
@@ -16,7 +16,7 @@ impl StatusBar {
 }
 
 impl Render for StatusBar {
-    fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut gpui_kit::Context<Self>) -> impl IntoElement {
         let state = self.app_state.read(cx);
         let settings = &state.settings;
 
