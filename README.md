@@ -10,6 +10,8 @@ your files stay plain text, and jot helps you write them.
 - Tabs, find and replace, Go to Line, word wrap, line numbers and zoom
 - Several windows in one jot, and files opened with `jot notes.txt` or Open With join the
   running jot as tabs
+- On Windows, a place in File Explorer's Open with menu for text files, added from Settings, and
+  a taskbar jump list with New Window, New Document and your recent files
 - An optional smooth caret that glides as you type and move around
 - Light and dark color themes
 - New from Template, which starts a new document from any file

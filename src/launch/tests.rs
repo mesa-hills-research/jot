@@ -2,7 +2,7 @@
 
 // Named one by one: `gpui_kit::*` would bring in GPUI's `test` attribute
 // in place of the built-in one.
-use super::{Launch, handle, jot_app, open_window};
+use super::{Launch, handle, jot_app, new_document, open_window};
 use crate::actions::{NewTab, NewWindow, ToggleLineNumbers};
 use crate::autocomplete::SharedVocabulary;
 use crate::chrome;
@@ -253,6 +253,30 @@ fn a_launch_without_files_opens_a_window(cx: &mut TestAppContext) {
     open(Vec::new(), cx);
     cx.update(|cx| handle(Launch::Files(Vec::new()), cx));
     settle(cx);
+    assert_eq!(cx.windows().len(), 2);
+}
+
+#[gpui_kit::test]
+fn a_new_document_opens_in_the_most_recently_used_window(cx: &mut TestAppContext) {
+    let app_state = start(cx);
+    // With no window, it opens one.
+    cx.update(new_document);
+    settle(cx);
+    let first = cx.windows()[0];
+    assert_eq!(tabs(first, cx).0, ["Untitled"]);
+
+    let second = open(Vec::new(), cx);
+    app_state.update(cx, |state, _| state.window_activated(first));
+    cx.update(new_document);
+    settle(cx);
+    assert_eq!(
+        tabs(first, cx),
+        (
+            vec!["Untitled".into(), "Untitled 2".into()],
+            "Untitled 2".into()
+        )
+    );
+    assert_eq!(tabs(second, cx).0, ["Untitled"]);
     assert_eq!(cx.windows().len(), 2);
 }
 

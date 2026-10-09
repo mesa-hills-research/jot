@@ -4,7 +4,11 @@
 //! while one runs, and later launches don't reach it, which is useful for
 //! testing. Options jot doesn't know are skipped, such as the `-psn_…` that
 //! older macOS versions pass, and `--` ends the options.
+//!
+//! On Windows, the tasks of the taskbar's jump list start jot with
+//! `--dock-action <task>`.
 
+use crate::instance::Kind;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
@@ -14,15 +18,23 @@ pub struct Args {
     pub paths: Vec<PathBuf>,
     /// Run apart from any jot that is running.
     pub new_instance: bool,
+    /// What to ask a running jot for besides the files.
+    pub kind: Kind,
 }
 
 impl Args {
     /// Reads the arguments after the program's name. Relative paths are
     /// taken from `cwd`, the folder jot was started in.
+    // `--dock-action` takes the argument after it, on Windows.
+    #[cfg_attr(
+        not(any(target_os = "windows", test)),
+        allow(clippy::while_let_on_iterator)
+    )]
     pub fn parse(args: impl IntoIterator<Item = OsString>, cwd: &Path) -> Self {
         let mut parsed = Self::default();
         let mut options_ended = false;
-        for arg in args {
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
             if !options_ended {
                 if arg == "--" {
                     options_ended = true;
@@ -30,6 +42,12 @@ impl Args {
                 }
                 if arg == "--new-instance" {
                     parsed.new_instance = true;
+                    continue;
+                }
+                #[cfg(any(target_os = "windows", test))]
+                if arg == "--dock-action" {
+                    let task = args.next().unwrap_or_default();
+                    parsed.kind = crate::windows_shell::task(&task.to_string_lossy());
                     continue;
                 }
                 if is_option(&arg) {
@@ -179,6 +197,17 @@ mod tests {
             args.paths,
             vec![cwd().join("--new-instance"), cwd().join("-x.txt")]
         );
+    }
+
+    #[test]
+    fn a_jump_list_task_asks_for_what_it_names() {
+        let args = parse(&["--dock-action", "1"], &cwd());
+        assert_eq!(args.kind, Kind::NewDocument);
+        assert!(args.paths.is_empty());
+        // New Window asks for a window, as a launch without files does.
+        assert_eq!(parse(&["--dock-action", "0"], &cwd()), Args::default());
+        // A task this jot doesn't have, such as one a newer jot added.
+        assert_eq!(parse(&["--dock-action", "7"], &cwd()), Args::default());
     }
 
     #[cfg(unix)]

@@ -124,6 +124,18 @@ impl JotApp {
         self.focus_editor(window, cx);
     }
 
+    /// Opens a new document in a tab of its own, and shows it.
+    #[cfg(any(target_os = "windows", test))]
+    pub fn new_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.window_state.update(cx, |state, cx| {
+            state.new_untitled_document(window, cx);
+            if state.current_view != View::Editor {
+                state.show_editor(cx);
+            }
+        });
+        self.focus_editor(window, cx);
+    }
+
     /// Shows the document in tab `index`.
     pub fn show_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.window_state.update(cx, |state, cx| {

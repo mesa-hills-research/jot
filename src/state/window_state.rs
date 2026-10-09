@@ -191,6 +191,8 @@ impl WindowState {
             return Ok(());
         }
         let content = read_text(&path)?;
+        #[cfg(target_os = "windows")]
+        crate::windows_shell::file_used(&path, cx);
         let options = self.editor_options(cx);
         let document = cx.new(|cx| Document::from_path(path, content, &options, window, cx));
         self.add_document(document, cx);
@@ -281,6 +283,8 @@ impl WindowState {
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
         std::fs::write(&path, &content)?;
+        #[cfg(target_os = "windows")]
+        crate::windows_shell::file_used(&path, cx);
 
         doc.update(cx, |doc, cx| {
             doc.mark_saved(cx);
@@ -294,6 +298,8 @@ impl WindowState {
     }
 
     pub fn document_saved(&mut self, doc: Entity<Document>, path: PathBuf, cx: &mut Context<Self>) {
+        #[cfg(target_os = "windows")]
+        crate::windows_shell::file_used(&path, cx);
         doc.update(cx, |doc, cx| {
             doc.set_path(path);
             doc.mark_saved(cx);

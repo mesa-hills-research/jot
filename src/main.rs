@@ -18,6 +18,10 @@ mod launch;
 mod spell;
 mod state;
 mod theme;
+// Windows only. Its parts without Win32 calls build for tests everywhere.
+#[cfg(any(target_os = "windows", test))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod windows_shell;
 
 use args::Args;
 use assets::Assets;
@@ -37,7 +41,7 @@ fn main() {
     let server = if args.new_instance {
         None
     } else {
-        match instance::start(&args.paths) {
+        match instance::start(&args.paths, args.kind) {
             Startup::Primary(server) => Some(server),
             Startup::HandedOver => return,
             Startup::Alone => None,
@@ -74,6 +78,10 @@ fn main() {
     });
 
     app.run(move |cx| {
+        // Before the first window, so that every window shares one taskbar
+        // button and its jump list.
+        #[cfg(target_os = "windows")]
+        windows_shell::set_app_identity(cx);
         gpui_kit::init(cx);
         // Windows and Linux quit with the last window. macOS keeps jot
         // running, as Mac apps do, until Quit.
@@ -88,6 +96,8 @@ fn main() {
         if launch::open_window(args.paths, cx).is_none() {
             panic!("jot couldn\u{2019}t open a window");
         }
+        #[cfg(target_os = "windows")]
+        windows_shell::init(cx);
 
         cx.spawn(async move |cx| {
             while let Ok(launch) = received.recv().await {

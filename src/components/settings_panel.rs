@@ -44,6 +44,11 @@ const WORD_SUGGESTIONS_HELP: &str = if cfg!(target_os = "macos") {
      suggestion. Quiet waits until you pause."
 };
 
+/// What the Open with row says it does.
+#[cfg(target_os = "windows")]
+const OPEN_WITH_HELP: &str =
+    "Lists Jot in File Explorer\u{2019}s Open with menu and in Default apps for text files.";
+
 /// How wide the page's column of settings grows.
 const PAGE_WIDTH: f32 = 720.;
 
@@ -302,6 +307,29 @@ fn section(title: &'static str, rows: Vec<AnyElement>, cx: &App) -> impl IntoEle
         )
 }
 
+/// The button that adds Jot to File Explorer's Open with menu, or removes
+/// it.
+#[cfg(target_os = "windows")]
+fn open_with_row(cx: &App) -> AnyElement {
+    use crate::windows_shell::{OpenWith, toggle_open_with};
+    let state = OpenWith::get(cx);
+    let label = if state.added {
+        "Remove Jot from Open with"
+    } else {
+        "Add Jot to Open with"
+    };
+    row(
+        "Open with",
+        Some(OPEN_WITH_HELP),
+        Button::new("open-with")
+            .outline()
+            .label(label)
+            .loading(state.busy)
+            .on_click(|_, window, cx| toggle_open_with(window, cx)),
+        cx,
+    )
+}
+
 /// A setting: its name, with a line of help under it when `help` is given,
 /// at the start of the row, and its control at the end. The compact font
 /// picker lays out its rows the same way.
@@ -505,6 +533,21 @@ impl Render for SettingsPanel {
             cx,
         );
 
+        let page = v_flex()
+            .w_full()
+            .max_w(px(PAGE_WIDTH))
+            .px_8()
+            .py_6()
+            .gap_6()
+            .child(header)
+            .child(appearance)
+            .child(font)
+            .child(editor)
+            .child(writing)
+            .child(keyboard);
+        #[cfg(target_os = "windows")]
+        let page = page.child(section("Files", vec![open_with_row(cx)], cx));
+
         div()
             .id("settings-panel")
             .size_full()
@@ -517,20 +560,7 @@ impl Render for SettingsPanel {
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll_handle)
                     .items_center()
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .max_w(px(PAGE_WIDTH))
-                            .px_8()
-                            .py_6()
-                            .gap_6()
-                            .child(header)
-                            .child(appearance)
-                            .child(font)
-                            .child(editor)
-                            .child(writing)
-                            .child(keyboard),
-                    ),
+                    .child(page),
             )
             .child(
                 // Always shown, so the page reads as one that scrolls.

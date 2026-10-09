@@ -7,11 +7,12 @@
 //! the [`Reply`]. When the running jot doesn't answer in time, or declines,
 //! the later launch runs on its own.
 //!
-//! Each message is a line of JSON with the [`PROTOCOL_VERSION`] it was
-//! written for. A jot declines a request from a version it doesn't know.
-//! Optional fields can be added to a version, since older readers skip
-//! fields they don't know. A change an older jot would misread needs a new
-//! version.
+//! Each message is a line of JSON with a version. A launch writes the
+//! oldest version that carries its request, and a jot declines a request
+//! newer than its [`PROTOCOL_VERSION`], so an older running jot still takes
+//! the files from a newer launch. Optional fields can be added to a version,
+//! since older readers skip fields they don't know. A change an older jot
+//! would misread needs a new version.
 
 #[cfg(windows)]
 mod pipe;
@@ -35,7 +36,15 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// The version of the messages this jot writes, and the one it reads.
+/// The newest version of the requests this jot reads, which its replies
+/// carry.
+///
+/// - 1: the files to open, or none for a window.
+/// - 2: adds [`Kind`], for the New Document task of the taskbar's jump list
+///   on Windows.
+#[cfg(any(target_os = "windows", test))]
+pub const PROTOCOL_VERSION: u32 = 2;
+#[cfg(not(any(target_os = "windows", test)))]
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// The longest message read, so a stray connection can't fill memory.
@@ -79,11 +88,11 @@ pub enum Startup {
     Alone,
 }
 
-/// Hands `paths` to the user's running jot, or makes this process the one
-/// that later launches hand theirs to.
-pub fn start(paths: &[PathBuf]) -> Startup {
+/// Hands `paths`, and what else the launch asks for, to the user's running
+/// jot, or makes this process the one that later launches hand theirs to.
+pub fn start(paths: &[PathBuf], kind: Kind) -> Startup {
     match Endpoint::for_user() {
-        Ok(endpoint) => start_at(&endpoint, paths, Patience::default()),
+        Ok(endpoint) => start_at(&endpoint, paths, kind, Patience::default()),
         Err(error) => {
             log::warn!("jot can\u{2019}t look for a running jot, so it runs on its own: {error}");
             Startup::Alone
@@ -92,7 +101,7 @@ pub fn start(paths: &[PathBuf]) -> Startup {
 }
 
 /// [`start`] at `endpoint`.
-pub fn start_at(endpoint: &Endpoint, paths: &[PathBuf], patience: Patience) -> Startup {
+pub fn start_at(endpoint: &Endpoint, paths: &[PathBuf], kind: Kind, patience: Patience) -> Startup {
     let give_up = Instant::now() + patience.connect;
     loop {
         match platform::claim(endpoint) {
@@ -104,7 +113,7 @@ pub fn start_at(endpoint: &Endpoint, paths: &[PathBuf], patience: Patience) -> S
             }
         }
         match platform::connect(endpoint) {
-            Ok(Some(connection)) => return hand_over(connection, paths, patience.answer),
+            Ok(Some(connection)) => return hand_over(connection, paths, kind, patience.answer),
             Ok(None) => {}
             Err(error) => {
                 log::warn!(
@@ -123,8 +132,13 @@ pub fn start_at(endpoint: &Endpoint, paths: &[PathBuf], patience: Patience) -> S
 }
 
 /// Sends `paths` over `connection` and waits for the answer.
-fn hand_over(connection: platform::Connection, paths: &[PathBuf], wait: Duration) -> Startup {
-    let request = Request::new(paths, wait);
+fn hand_over(
+    connection: platform::Connection,
+    paths: &[PathBuf],
+    kind: Kind,
+    wait: Duration,
+) -> Startup {
+    let request = Request::new(paths, kind, wait);
     // On a thread, so a jot that never answers can't hold the launch up.
     let (sender, answer) = mpsc::channel();
     thread::spawn(move || {
@@ -200,10 +214,10 @@ impl Server {
 
 /// Reads a request from `connection`, delivers it, and answers.
 fn answer(mut connection: platform::Connection, deliver: &dyn Fn(Incoming)) {
-    let reply = match read_request(&mut connection) {
+    let reply = match read_request(&mut connection, PROTOCOL_VERSION) {
         Ok(request) => match request.answer_by() {
             Some(deadline) => {
-                let incoming = Incoming::new(request.paths());
+                let incoming = Incoming::new(request.paths(), request.kind);
                 let answer = incoming.answer.clone();
                 deliver(incoming);
                 if answer.wait_until(deadline) {
@@ -222,13 +236,14 @@ fn answer(mut connection: platform::Connection, deliver: &dyn Fn(Incoming)) {
     platform::finish(connection);
 }
 
-fn read_request(connection: &mut impl Read) -> Result<Request, String> {
+/// Reads a request of a version up to `newest`.
+fn read_request(connection: &mut impl Read, newest: u32) -> Result<Request, String> {
     let value: serde_json::Value = read_message(connection).map_err(|error| error.to_string())?;
     match value.get("version").and_then(serde_json::Value::as_u64) {
-        Some(version) if version == u64::from(PROTOCOL_VERSION) => {}
+        Some(version) if (1..=u64::from(newest)).contains(&version) => {}
         Some(version) => {
             return Err(format!(
-                "This jot reads version {PROTOCOL_VERSION} requests, not version {version}."
+                "This jot reads requests up to version {newest}, not version {version}."
             ));
         }
         None => return Err("The request has no version.".into()),
@@ -239,19 +254,27 @@ fn read_request(connection: &mut impl Read) -> Result<Request, String> {
 /// A request from a later launch, as the running jot receives it.
 pub struct Incoming {
     paths: Vec<PathBuf>,
+    kind: Kind,
     answer: Arc<Answer>,
 }
 
 impl Incoming {
-    fn new(paths: Vec<PathBuf>) -> Self {
+    fn new(paths: Vec<PathBuf>, kind: Kind) -> Self {
         Self {
             paths,
+            kind,
             answer: Arc::default(),
         }
     }
 
+    /// What the launch asks for besides its files.
+    pub fn kind(&self) -> Kind {
+        self.kind
+    }
+
     /// Takes the request on, which tells the launch that it can exit, and
-    /// returns the files it asks to open. With none, it asks for a window.
+    /// returns the files it asks to open. With none, a request of
+    /// [`Kind::Open`] asks for a window.
     ///
     /// Returns `None` when the launch has stopped waiting and runs on its
     /// own, so the request is dropped.
@@ -326,6 +349,34 @@ impl Answer {
     }
 }
 
+/// What a launch asks the running jot for besides its files.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Kind {
+    /// Opens the files, or a window without any.
+    #[default]
+    Open,
+    /// Opens a new document in the most recently used window: the New
+    /// Document task of the taskbar's jump list on Windows.
+    #[cfg(any(target_os = "windows", test))]
+    NewDocument,
+}
+
+impl Kind {
+    /// The oldest protocol version that carries this request.
+    fn version(self) -> u32 {
+        match self {
+            Self::Open => 1,
+            #[cfg(any(target_os = "windows", test))]
+            Self::NewDocument => 2,
+        }
+    }
+
+    fn is_open(&self) -> bool {
+        *self == Self::Open
+    }
+}
+
 /// A launch's request: the files to open, as absolute paths. With none it
 /// asks for a window.
 #[derive(Debug, Serialize, Deserialize)]
@@ -338,18 +389,23 @@ struct Request {
     /// running jot gives up a little sooner, so it never opens files that
     /// the launch opens too.
     wait: u64,
+    /// Since version 2. Left out when it is [`Kind::Open`], so a request
+    /// for files reads the same as in version 1.
+    #[serde(default, skip_serializing_if = "Kind::is_open")]
+    kind: Kind,
 }
 
 impl Request {
-    fn new(paths: &[PathBuf], wait: Duration) -> Self {
+    fn new(paths: &[PathBuf], kind: Kind, wait: Duration) -> Self {
         Self {
-            version: PROTOCOL_VERSION,
+            version: kind.version(),
             paths: paths
                 .iter()
                 .map(|path| WirePath::new(path.clone()))
                 .collect(),
             sent_at: millis_since_epoch(SystemTime::now()),
             wait: u64::try_from(wait.as_millis()).unwrap_or(u64::MAX),
+            kind,
         }
     }
 

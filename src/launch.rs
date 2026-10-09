@@ -3,7 +3,7 @@
 
 use crate::app::JotApp;
 use crate::chrome;
-use crate::instance::Incoming;
+use crate::instance::{Incoming, Kind};
 use crate::state::AppState;
 use gpui_kit::component::{Root, WindowExt, notification::Notification};
 use gpui_kit::*;
@@ -23,7 +23,8 @@ pub enum WithoutFiles {
 }
 
 /// The choice jot makes. Files always open in the most recently used
-/// window, which comes to the front.
+/// window, which comes to the front. The New Window task of the taskbar's
+/// jump list on Windows is a launch without files.
 pub const LAUNCH_WITHOUT_FILES: WithoutFiles = WithoutFiles::NewWindow;
 
 /// A request for jot to open files, or a window.
@@ -36,14 +37,26 @@ pub enum Launch {
 
 /// Carries out a request from a later launch or from the system.
 pub fn handle(launch: Launch, cx: &mut App) {
-    let paths = match launch {
-        Launch::Instance(incoming) => match incoming.accept() {
-            Some(paths) => paths,
-            // The launch stopped waiting and runs on its own.
-            None => return,
-        },
-        Launch::Files(paths) => paths,
+    let (kind, paths) = match launch {
+        Launch::Instance(incoming) => {
+            let kind = incoming.kind();
+            match incoming.accept() {
+                Some(paths) => (kind, paths),
+                // The launch stopped waiting and runs on its own.
+                None => return,
+            }
+        }
+        Launch::Files(paths) => (Kind::Open, paths),
     };
+    match kind {
+        Kind::Open => open_or_show(paths, cx),
+        #[cfg(any(target_os = "windows", test))]
+        Kind::NewDocument => new_document(cx),
+    }
+}
+
+/// Opens `paths`, or without any, a window.
+fn open_or_show(paths: Vec<PathBuf>, cx: &mut App) {
     log::info!("A launch asks for {} files", paths.len());
     if !paths.is_empty() {
         open_paths(paths, cx);
@@ -52,6 +65,28 @@ pub fn handle(launch: Launch, cx: &mut App) {
     let window = match (LAUNCH_WITHOUT_FILES, most_recent_window(cx)) {
         (WithoutFiles::FocusWindow, Some(window)) => Some(window),
         _ => open_window(Vec::new(), cx),
+    };
+    if let Some(window) = window {
+        bring_to_front(window, cx);
+    }
+}
+
+/// Opens a new document in the most recently used window, or in a new
+/// window when there is none, and brings it to the front.
+#[cfg(any(target_os = "windows", test))]
+pub fn new_document(cx: &mut App) {
+    let window = match most_recent_window(cx) {
+        Some(handle) => {
+            handle
+                .update(cx, |_, window, cx| {
+                    if let Some(app) = jot_app(window, cx) {
+                        app.update(cx, |app, cx| app.new_document(window, cx));
+                    }
+                })
+                .ok();
+            Some(handle)
+        }
+        None => open_window(Vec::new(), cx),
     };
     if let Some(window) = window {
         bring_to_front(window, cx);

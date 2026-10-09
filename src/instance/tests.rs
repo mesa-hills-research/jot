@@ -55,7 +55,7 @@ impl Drop for Scratch {
 /// Makes this the running jot, which takes every request and passes on
 /// the paths.
 fn serve(endpoint: &Endpoint) -> Receiver<Vec<PathBuf>> {
-    let Startup::Primary(server) = start_at(endpoint, &[], QUICK) else {
+    let Startup::Primary(server) = start_at(endpoint, &[], Kind::Open, QUICK) else {
         panic!("the first jot should listen");
     };
     let (sender, received) = mpsc::channel();
@@ -90,12 +90,12 @@ fn a_later_launch_hands_its_files_over() {
     let received = serve(&scratch.endpoint);
 
     let files = paths(&["a.txt", "b c.md"]);
-    let startup = start_at(&scratch.endpoint, &files, QUICK);
+    let startup = start_at(&scratch.endpoint, &files, Kind::Open, QUICK);
     assert_eq!(outcome(startup), "handed over");
     assert_eq!(received.recv().unwrap(), files);
 
     // Without files, it asks for a window.
-    let startup = start_at(&scratch.endpoint, &[], QUICK);
+    let startup = start_at(&scratch.endpoint, &[], Kind::Open, QUICK);
     assert_eq!(outcome(startup), "handed over");
     assert_eq!(received.recv().unwrap(), Vec::<PathBuf>::new());
 }
@@ -108,7 +108,12 @@ fn a_path_that_is_not_unicode_arrives_whole() {
     let received = serve(&scratch.endpoint);
 
     let file = PathBuf::from(OsString::from_vec(b"/notes/caf\xe9.txt".to_vec()));
-    let startup = start_at(&scratch.endpoint, std::slice::from_ref(&file), QUICK);
+    let startup = start_at(
+        &scratch.endpoint,
+        std::slice::from_ref(&file),
+        Kind::Open,
+        QUICK,
+    );
     assert_eq!(outcome(startup), "handed over");
     assert_eq!(received.recv().unwrap(), vec![file]);
 }
@@ -119,7 +124,7 @@ fn a_socket_left_by_a_crashed_jot_is_taken_over() {
     let scratch = Scratch::new();
     // A jot that crashed leaves its socket and lock file behind, and the
     // lock goes with the process.
-    let Startup::Primary(server) = start_at(&scratch.endpoint, &[], QUICK) else {
+    let Startup::Primary(server) = start_at(&scratch.endpoint, &[], Kind::Open, QUICK) else {
         panic!("the first jot should listen");
     };
     drop(server);
@@ -127,7 +132,7 @@ fn a_socket_left_by_a_crashed_jot_is_taken_over() {
 
     let received = serve(&scratch.endpoint);
     let files = paths(&["a.txt"]);
-    let startup = start_at(&scratch.endpoint, &files, QUICK);
+    let startup = start_at(&scratch.endpoint, &files, Kind::Open, QUICK);
     assert_eq!(outcome(startup), "handed over");
     assert_eq!(received.recv().unwrap(), files);
 }
@@ -144,7 +149,7 @@ fn of_launches_at_the_same_moment_exactly_one_listens() {
             thread::spawn(move || {
                 barrier.wait();
                 let files = paths(&[&format!("{launch}.txt")]);
-                let startup = start_at(&scratch.endpoint, &files, QUICK);
+                let startup = start_at(&scratch.endpoint, &files, Kind::Open, QUICK);
                 let outcome = outcome_of(startup, sender);
                 (outcome, files)
             })
@@ -193,12 +198,12 @@ fn of_launches_at_the_same_moment_exactly_one_listens() {
 fn a_jot_that_never_answers_lets_the_launch_run_alone() {
     let scratch = Scratch::new();
     // The endpoint is taken, but nothing reads from it.
-    let Startup::Primary(_hung) = start_at(&scratch.endpoint, &[], QUICK) else {
+    let Startup::Primary(_hung) = start_at(&scratch.endpoint, &[], Kind::Open, QUICK) else {
         panic!("the first jot should listen");
     };
 
     let started = Instant::now();
-    let startup = start_at(&scratch.endpoint, &paths(&["a.txt"]), QUICK);
+    let startup = start_at(&scratch.endpoint, &paths(&["a.txt"]), Kind::Open, QUICK);
     assert_eq!(outcome(startup), "alone");
     assert!(
         started.elapsed() < Duration::from_secs(3),
@@ -210,7 +215,7 @@ fn a_jot_that_never_answers_lets_the_launch_run_alone() {
 #[test]
 fn a_request_the_windows_never_take_is_declined() {
     let scratch = Scratch::new();
-    let Startup::Primary(server) = start_at(&scratch.endpoint, &[], QUICK) else {
+    let Startup::Primary(server) = start_at(&scratch.endpoint, &[], Kind::Open, QUICK) else {
         panic!("the first jot should listen");
     };
     // The windows are busy: requests wait, untaken.
@@ -218,7 +223,7 @@ fn a_request_the_windows_never_take_is_declined() {
     let sender = Mutex::new(sender);
     server.serve(move |incoming| sender.lock().unwrap().send(incoming).unwrap());
 
-    let startup = start_at(&scratch.endpoint, &paths(&["a.txt"]), QUICK);
+    let startup = start_at(&scratch.endpoint, &paths(&["a.txt"]), Kind::Open, QUICK);
     assert_eq!(outcome(startup), "alone");
     // Once the windows get to it, the launch has opened it itself.
     let incoming = held.recv().unwrap();
@@ -230,7 +235,7 @@ fn a_request_from_another_version_is_declined() {
     let scratch = Scratch::new();
     let received = serve(&scratch.endpoint);
 
-    let mut future = Request::new(&paths(&["a.txt"]), QUICK.answer);
+    let mut future = Request::new(&paths(&["a.txt"]), Kind::Open, QUICK.answer);
     future.version = PROTOCOL_VERSION + 1;
     let reply = exchange(&scratch.endpoint, &serde_json::to_value(&future).unwrap());
     assert!(!reply.accepted);
@@ -245,7 +250,7 @@ fn a_request_from_another_version_is_declined() {
     // None of them reached the windows, and a good one still does.
     let files = paths(&["b.txt"]);
     assert_eq!(
-        outcome(start_at(&scratch.endpoint, &files, QUICK)),
+        outcome(start_at(&scratch.endpoint, &files, Kind::Open, QUICK)),
         "handed over"
     );
     assert_eq!(received.recv().unwrap(), files);
@@ -256,7 +261,8 @@ fn a_request_with_fields_this_version_lacks_is_read() {
     let scratch = Scratch::new();
     let received = serve(&scratch.endpoint);
 
-    let mut request = serde_json::to_value(Request::new(&paths(&["a.txt"]), QUICK.answer)).unwrap();
+    let mut request =
+        serde_json::to_value(Request::new(&paths(&["a.txt"]), Kind::Open, QUICK.answer)).unwrap();
     request["line"] = 12.into();
     let reply = exchange(&scratch.endpoint, &request);
     assert!(reply.accepted, "{reply:?}");
@@ -264,8 +270,55 @@ fn a_request_with_fields_this_version_lacks_is_read() {
 }
 
 #[test]
+fn a_launch_can_ask_for_a_new_document() {
+    let scratch = Scratch::new();
+    let Startup::Primary(server) = start_at(&scratch.endpoint, &[], Kind::Open, QUICK) else {
+        panic!("the first jot should listen");
+    };
+    let (sender, received) = mpsc::channel();
+    let sender = Mutex::new(sender);
+    server.serve(move |incoming| {
+        let kind = incoming.kind();
+        if let Some(paths) = incoming.accept() {
+            sender.lock().unwrap().send((kind, paths)).unwrap();
+        }
+    });
+
+    let startup = start_at(&scratch.endpoint, &[], Kind::NewDocument, QUICK);
+    assert_eq!(outcome(startup), "handed over");
+    assert_eq!(received.recv().unwrap(), (Kind::NewDocument, Vec::new()));
+
+    let files = paths(&["a.txt"]);
+    let startup = start_at(&scratch.endpoint, &files, Kind::Open, QUICK);
+    assert_eq!(outcome(startup), "handed over");
+    assert_eq!(received.recv().unwrap(), (Kind::Open, files));
+}
+
+#[test]
+fn a_version_1_jot_takes_files_and_declines_a_new_document() {
+    // Files go as version 1, without a kind, as they always have.
+    let files = Request::new(&paths(&["a.txt"]), Kind::Open, QUICK.answer);
+    let files = serde_json::to_value(files).unwrap();
+    assert_eq!(files["version"], 1);
+    assert!(files.get("kind").is_none(), "{files}");
+    let line = format!("{files}\n");
+    assert!(read_request(&mut line.as_bytes(), 1).is_ok());
+
+    // A new document needs version 2, which a version 1 jot declines, so
+    // the launch runs on its own.
+    let new_document = Request::new(&[], Kind::NewDocument, QUICK.answer);
+    let new_document = serde_json::to_value(new_document).unwrap();
+    assert_eq!(new_document["version"], 2);
+    let line = format!("{new_document}\n");
+    let error = read_request(&mut line.as_bytes(), 1).unwrap_err();
+    assert!(error.contains("version 2"), "{error}");
+    let request = read_request(&mut line.as_bytes(), PROTOCOL_VERSION).unwrap();
+    assert_eq!(request.kind, Kind::NewDocument);
+}
+
+#[test]
 fn a_request_the_launch_stopped_waiting_for_is_dropped() {
-    let mut request = Request::new(&paths(&["a.txt"]), Duration::from_secs(3));
+    let mut request = Request::new(&paths(&["a.txt"]), Kind::Open, Duration::from_secs(3));
     assert!(request.answer_by().is_some());
     request.sent_at -= 3_000;
     assert!(request.answer_by().is_none());
@@ -280,7 +333,7 @@ fn a_folder_others_can_open_is_not_used() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    let startup = start_at(&scratch.endpoint, &[], QUICK);
+    let startup = start_at(&scratch.endpoint, &[], Kind::Open, QUICK);
     assert_eq!(outcome(startup), "alone");
 }
 
