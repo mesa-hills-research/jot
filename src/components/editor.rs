@@ -213,12 +213,13 @@ impl Editor {
 
 impl Render for Editor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (font_size, font_family, document) = {
+        let (font, font_size, line_height, document) = {
             let state = self.app_state.read(cx);
             let settings = &state.settings;
             (
+                settings.editor_font.font(),
                 settings.effective_font_size(),
-                settings.font_family.clone(),
+                settings.editor_font.line_height(),
                 state.active_document().cloned(),
             )
         };
@@ -234,9 +235,9 @@ impl Render for Editor {
                     // The text editor inherits the window's font, so the
                     // editor font, zoom and row height go on the element.
                     TextEditor::new(&editor_state)
-                        .font_family(font_family)
+                        .font(font)
                         .text_size(px(font_size))
-                        .line_height(relative(1.5))
+                        .line_height(relative(line_height))
                         .w_full(),
                 )
         } else {

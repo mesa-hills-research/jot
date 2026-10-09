@@ -11,6 +11,7 @@ mod assets;
 mod autocomplete;
 mod chrome;
 mod components;
+mod fonts;
 mod spell;
 mod state;
 mod theme;
@@ -32,7 +33,7 @@ fn main() {
         cx.set_quit_mode(QuitMode::LastWindowClosed);
         let settings = Settings::load();
         actions::init(&settings, cx);
-        load_fonts(cx);
+        fonts::register_fonts(cx);
         load_themes(cx, &settings.theme);
 
         gpui_kit::open_window(chrome::window_options(cx), cx, |window, cx| {
@@ -40,20 +41,6 @@ fn main() {
         })
         .expect("Failed to open window");
     });
-}
-
-fn load_fonts(cx: &mut App) {
-    if let Ok(Some(work_sans)) = Assets.load("fonts/WorkSans-Regular.ttf")
-        && let Err(e) = cx.text_system().add_fonts(vec![work_sans])
-    {
-        log::error!("Failed to load Work Sans font: {}", e);
-    }
-
-    if let Ok(Some(jetbrains)) = Assets.load("fonts/JetBrainsMono-Regular.ttf")
-        && let Err(e) = cx.text_system().add_fonts(vec![jetbrains])
-    {
-        log::error!("Failed to load JetBrains Mono font: {}", e);
-    }
 }
 
 fn load_themes(cx: &mut App, initial_theme: &str) {

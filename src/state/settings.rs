@@ -1,5 +1,7 @@
-use gpui_kit::SharedString;
+use crate::fonts::DEFAULT_EDITOR_FONT;
+use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::Keymap;
+use gpui_kit::{SharedString, px};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -13,8 +15,10 @@ pub const ZOOM_LEVELS: &[u32] = &[50, 75, 90, 100, 110, 125, 150, 175, 200, 250,
 #[serde(default)]
 pub struct Settings {
     pub theme: SharedString,
-    pub font_family: SharedString,
-    pub font_size: u32,
+    /// The editor font: family, weight, style, size, line height and
+    /// OpenType features. Files written before it existed name the family
+    /// and size alone, in `font_family` and `font_size`.
+    pub editor_font: FontSettings,
     pub word_wrap: bool,
     pub line_numbers: bool,
     pub xml_auto_complete: bool,
@@ -31,8 +35,9 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: "Alduin".into(),
-            font_family: "JetBrains Mono".into(),
-            font_size: 14,
+            editor_font: FontSettings::new(DEFAULT_EDITOR_FONT)
+                .with_size(px(14.))
+                .with_line_height(1.5),
             word_wrap: false,
             line_numbers: true,
             xml_auto_complete: false,
@@ -54,8 +59,25 @@ impl Settings {
     pub fn load() -> Self {
         Self::config_path()
             .and_then(|path| std::fs::read_to_string(&path).ok())
-            .and_then(|content| serde_json::from_str(&content).ok())
+            .and_then(|content| Self::from_json(&content))
             .unwrap_or_default()
+    }
+
+    /// Reads settings saved as JSON, by this version or an earlier one.
+    fn from_json(content: &str) -> Option<Self> {
+        let value: serde_json::Value = serde_json::from_str(content).ok()?;
+        let mut settings: Settings = serde_json::from_value(value.clone()).ok()?;
+        if value.get("editor_font").is_none() {
+            let mut font = settings.editor_font.clone();
+            if let Some(family) = value.get("font_family").and_then(|family| family.as_str()) {
+                font = font.with_family(family.to_string());
+            }
+            if let Some(size) = value.get("font_size").and_then(|size| size.as_f64()) {
+                font = font.with_size(px(size as f32));
+            }
+            settings.editor_font = font;
+        }
+        Some(settings)
     }
 
     pub fn save(&self) {
@@ -92,8 +114,9 @@ impl Settings {
         self.zoom_level = 100;
     }
 
+    /// The editor font's size at the current zoom, in pixels.
     pub fn effective_font_size(&self) -> f32 {
-        self.font_size as f32 * (self.zoom_level as f32 / 100.0)
+        f32::from(self.editor_font.size()) * (self.zoom_level as f32 / 100.0)
     }
 }
 
@@ -115,11 +138,30 @@ mod tests {
             "restore_session": false,
             "zoom_level": 100
         }"#;
-        let settings: Settings = serde_json::from_str(old).unwrap();
+        let settings = Settings::from_json(old).unwrap();
         assert_eq!(settings.theme, "Gruvbox Dark");
-        assert_eq!(settings.font_size, 16);
         assert!(settings.spell_check);
         assert_eq!(settings.keymap, Keymap::Cua);
+        // The family and size become the editor font.
+        assert_eq!(settings.editor_font.family(), "JetBrains Mono");
+        assert_eq!(settings.editor_font.size(), px(16.));
+        assert_eq!(settings.editor_font.line_height(), 1.5);
+    }
+
+    #[test]
+    fn the_editor_font_round_trips() {
+        let settings = Settings {
+            editor_font: FontSettings::new("Inconsolata")
+                .with_size(px(15.))
+                .with_weight(gpui_kit::FontWeight::BOLD)
+                .with_line_height(1.7)
+                .with_feature("calt", false),
+            ..Settings::default()
+        };
+        let json = serde_json::to_string_pretty(&settings).unwrap();
+        let loaded = Settings::from_json(&json).unwrap();
+        assert_eq!(loaded.editor_font, settings.editor_font);
+        assert_eq!(loaded.effective_font_size(), 15.);
     }
 
     #[test]

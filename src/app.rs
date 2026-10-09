@@ -3,12 +3,14 @@ use crate::chrome;
 use crate::components::{
     Editor, JotTabBar, JotTitleBar, SettingsPanel, StatusBar, View, close_tab_with_prompt,
 };
+use crate::fonts;
 use crate::state::{AppEvent, AppState};
 use gpui_kit::component::{
     ActiveTheme, WindowExt,
     button::{Button, ButtonVariants},
     dialog::DialogFooter,
     input::{self, Input, InputState},
+    notification::Notification,
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder;
@@ -29,6 +31,20 @@ pub struct JotApp {
 impl JotApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let app_state = cx.new(AppState::new);
+        // A font named in the settings may have gone, such as a font file
+        // that was deleted. The editor then uses the default, and says so.
+        let missing_font = app_state.update(cx, |state, cx| state.use_an_available_editor_font(cx));
+        if let Some(family) = missing_font {
+            cx.defer_in(window, move |_, window, cx| {
+                window.push_notification(
+                    Notification::warning(format!(
+                        "The font \u{201c}{family}\u{201d} isn\u{2019}t available, so the editor uses {}.",
+                        fonts::DEFAULT_EDITOR_FONT
+                    )),
+                    cx,
+                );
+            });
+        }
 
         window.on_window_should_close(cx, chrome::can_close);
 
@@ -379,7 +395,7 @@ impl Render for JotApp {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .font_family("Work Sans")
+            .font_family(fonts::UI_FONT)
             .child(
                 self.bind_global_actions(div(), cx)
                     .child(self.title_bar.clone()),

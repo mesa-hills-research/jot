@@ -1,10 +1,13 @@
+use crate::fonts;
 use crate::state::{AppEvent, AppState};
 use gpui_kit::component::{
-    ActiveTheme, IconName,
+    ActiveTheme, IconName, WindowExt,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
+    font_picker::{FontPicker, FontPickerEvent, FontPickerState},
     h_flex,
     input::Keymap,
+    notification::Notification,
     radio::RadioGroup,
     select::{SearchableVec, Select, SelectEvent, SelectState},
     v_flex,
@@ -13,6 +16,7 @@ use gpui_kit::{
     App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
+use std::borrow::Cow;
 
 /// The keybinding schemes the editor offers, as the settings page names them.
 const KEYMAPS: [(Keymap, &str); 3] = [
@@ -24,6 +28,7 @@ const KEYMAPS: [(Keymap, &str); 3] = [
 pub struct SettingsPanel {
     app_state: Entity<AppState>,
     theme_select: Entity<SelectState<SearchableVec<SharedString>>>,
+    font_picker: Entity<FontPickerState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -62,11 +67,68 @@ impl SettingsPanel {
             }
         });
 
+        // The installed fonts, jot's own, and the font files the user added.
+        let editor_font = app_state.read(cx).settings.editor_font.clone();
+        let font_picker = cx.new(|cx| {
+            FontPickerState::new(window, cx)
+                .app_fonts(fonts::bundled_fonts())
+                .added_fonts(fonts::user_fonts())
+                .default_settings(editor_font)
+        });
+        let font_subscription = cx.subscribe(&font_picker, {
+            let app_state = app_state.clone();
+            move |_, _, event: &FontPickerEvent, cx| {
+                let FontPickerEvent::Change(font) = event else {
+                    return;
+                };
+                app_state.update(cx, |state, cx| state.set_editor_font(font.clone(), cx));
+            }
+        });
+
         Self {
             app_state,
             theme_select,
-            _subscriptions: vec![subscription],
+            font_picker,
+            _subscriptions: vec![subscription, font_subscription],
         }
+    }
+
+    /// Asks for a font file, copies it into jot's fonts folder, registers it
+    /// and makes the editor use it.
+    fn add_font_file(font_picker: Entity<FontPickerState>, window: &mut Window, cx: &mut App) {
+        window
+            .spawn(cx, async move |cx| {
+                let Some(file) = rfd::AsyncFileDialog::new()
+                    .set_title("Add Font File")
+                    .add_filter("Fonts", &["ttf", "otf", "ttc", "otc"])
+                    .pick_file()
+                    .await
+                else {
+                    return;
+                };
+                let path = file.path().to_path_buf();
+                cx.update(|window, cx| {
+                    let added = fonts::import_font_file(&path).and_then(|imported| {
+                        font_picker.update(cx, |picker, cx| {
+                            let families = if imported.already_imported {
+                                imported.families
+                            } else {
+                                picker.add_fonts(vec![Cow::Owned(imported.data)], window, cx)?
+                            };
+                            if let Some(family) = families.first() {
+                                picker.choose_family_named(family, window, cx);
+                            }
+                            anyhow::Ok(())
+                        })
+                    });
+                    if let Err(error) = added {
+                        log::error!("Couldn't add the font {}: {error:#}", path.display());
+                        window.push_notification(Notification::error(error.to_string()), cx);
+                    }
+                })
+                .ok();
+            })
+            .detach();
     }
 
     fn get_theme_names(cx: &App) -> Vec<SharedString> {
@@ -135,6 +197,33 @@ impl Render for SettingsPanel {
                             .child(div().text_sm().child("Theme"))
                             .child(Select::new(&self.theme_select).w(px(240.))),
                     ),
+            )
+            .child(
+                v_flex()
+                    .gap_4()
+                    .max_w(px(760.))
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_lg()
+                                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                    .child("Editor Font"),
+                            )
+                            .child(
+                                Button::new("add-font-file")
+                                    .label("Add Font File\u{2026}")
+                                    .on_click({
+                                        let font_picker = self.font_picker.clone();
+                                        move |_, window, cx| {
+                                            Self::add_font_file(font_picker.clone(), window, cx)
+                                        }
+                                    }),
+                            ),
+                    )
+                    .child(FontPicker::new(&self.font_picker)),
             )
             .child(
                 v_flex()

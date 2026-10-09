@@ -2,11 +2,13 @@ use super::{Document, EditorOptions, Settings};
 use crate::actions::*;
 use crate::autocomplete::SharedVocabulary;
 use crate::components::View;
+use crate::fonts::{self, DEFAULT_EDITOR_FONT};
 use gpui_kit::component::WindowExt;
+use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::{Keymap, Position};
 use gpui_kit::{
-    App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, ParentElement,
-    Subscription, Window,
+    App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    ParentElement, SharedString, Subscription, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -101,6 +103,34 @@ impl AppState {
             editor_state.update(cx, |state, cx| state.set_spell_checking(enabled, cx));
         }
         cx.notify();
+    }
+
+    /// Draws every document in `font`, and saves it.
+    pub fn set_editor_font(&mut self, font: FontSettings, cx: &mut Context<Self>) {
+        if self.settings.editor_font == font {
+            return;
+        }
+        self.settings.editor_font = font;
+        self.settings.save();
+        cx.notify();
+    }
+
+    /// Switches the editor to the default font when the settings name one
+    /// the text system doesn't have, such as a font file that was deleted.
+    /// Returns the missing family.
+    pub fn use_an_available_editor_font(&mut self, cx: &App) -> Option<SharedString> {
+        let family = self.settings.editor_font.family().clone();
+        if fonts::is_available(&family, cx) {
+            return None;
+        }
+        self.settings.editor_font = self
+            .settings
+            .editor_font
+            .clone()
+            .with_family(DEFAULT_EDITOR_FONT)
+            .with_weight(FontWeight::NORMAL)
+            .with_italic(false);
+        Some(family)
     }
 
     /// Switches every open document, and new ones, to `keymap`.
