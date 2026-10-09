@@ -1,85 +1,49 @@
 use crate::autocomplete::{JotCompletionProvider, SharedVocabulary};
-use crate::spell::{Dictionary, SPELL_CHECK_DEBOUNCE, SpellScanner};
-use crate::spell_editor;
-use gpui_kit::component::input::{
-    EditorState, InputEvent, Position, RopeExt, TextDecorationCollection,
-};
-use gpui_kit::{AppContext, Context, Entity, SharedString, Subscription, Task, Window};
+use crate::spell::DocumentSpelling;
+use gpui_kit::component::input::{SuggestionOptions, TextareaState};
+use gpui_kit::{AppContext, Context, Entity, SharedString, Window};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
+
+/// How a new document's editor starts out, from the settings.
+#[derive(Clone)]
+pub struct EditorOptions {
+    pub word_wrap: bool,
+    pub line_numbers: bool,
+    pub spell_check: bool,
+    pub shared_vocab: Rc<RefCell<SharedVocabulary>>,
+    pub autocomplete_enabled: Rc<Cell<bool>>,
+}
 
 pub struct Document {
     pub path: Option<PathBuf>,
     pub title: SharedString,
     pub dirty: bool,
-    pub editor_state: Entity<EditorState>,
-    /// The spelling underlines, which follow the text as it is edited.
-    pub underlines: TextDecorationCollection,
+    pub editor_state: Entity<TextareaState>,
     content_hash: u64,
-    dictionary: Rc<Dictionary>,
-    spell_enabled: Rc<Cell<bool>>,
-    spell_scanner: SpellScanner,
-    _spell_check_task: Option<Task<()>>,
-    _subscriptions: Vec<Subscription>,
 }
 
 impl Document {
-    #[allow(clippy::too_many_arguments)]
     pub fn new_untitled(
         number: Option<u32>,
-        word_wrap: bool,
-        line_numbers: bool,
-        shared_vocab: Rc<RefCell<SharedVocabulary>>,
-        autocomplete_enabled: Rc<Cell<bool>>,
-        spell_enabled: Rc<Cell<bool>>,
+        options: &EditorOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let title = match number {
-            Some(n) if n > 1 => format!("Untitled {}", n).into(),
-            _ => "Untitled".into(),
-        };
-
-        let dictionary = shared_vocab.borrow().dictionary();
-        let editor_state = Self::build_editor_state(
-            None,
-            word_wrap,
-            line_numbers,
-            shared_vocab,
-            autocomplete_enabled,
-            window,
-            cx,
-        );
-        let underlines = spell_editor::create_underlines(&editor_state, cx);
-        let subscriptions = vec![Self::observe_editor(&editor_state, cx)];
-
-        let mut doc = Self {
+        Self {
             path: None,
-            title,
+            title: untitled_title(number),
             dirty: false,
-            editor_state,
-            underlines,
+            editor_state: Self::build_editor_state(None, options, window, cx),
             content_hash: 0,
-            dictionary,
-            spell_enabled,
-            spell_scanner: SpellScanner::new(),
-            _spell_check_task: None,
-            _subscriptions: subscriptions,
-        };
-        doc.schedule_spell_check(cx);
-        doc
+        }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn from_path(
         path: PathBuf,
         content: String,
-        word_wrap: bool,
-        line_numbers: bool,
-        shared_vocab: Rc<RefCell<SharedVocabulary>>,
-        autocomplete_enabled: Rc<Cell<bool>>,
-        spell_enabled: Rc<Cell<bool>>,
+        options: &EditorOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -88,175 +52,62 @@ impl Document {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "Unknown".to_string())
             .into();
-
         let content_hash = Self::hash_content(&content);
-
-        let dictionary = shared_vocab.borrow().dictionary();
-        let editor_state = Self::build_editor_state(
-            Some(content),
-            word_wrap,
-            line_numbers,
-            shared_vocab,
-            autocomplete_enabled,
-            window,
-            cx,
-        );
-        let underlines = spell_editor::create_underlines(&editor_state, cx);
-        let subscriptions = vec![Self::observe_editor(&editor_state, cx)];
-
-        let mut doc = Self {
+        Self {
             path: Some(path),
             title,
             dirty: false,
-            editor_state,
-            underlines,
+            editor_state: Self::build_editor_state(Some(content), options, window, cx),
             content_hash,
-            dictionary,
-            spell_enabled,
-            spell_scanner: SpellScanner::new(),
-            _spell_check_task: None,
-            _subscriptions: subscriptions,
-        };
-        doc.schedule_spell_check(cx);
-        doc
+        }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn from_template(
         content: String,
         number: Option<u32>,
-        word_wrap: bool,
-        line_numbers: bool,
-        shared_vocab: Rc<RefCell<SharedVocabulary>>,
-        autocomplete_enabled: Rc<Cell<bool>>,
-        spell_enabled: Rc<Cell<bool>>,
+        options: &EditorOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let title = match number {
-            Some(n) if n > 1 => format!("Untitled {}", n).into(),
-            _ => "Untitled".into(),
-        };
-
-        let has_content = !content.is_empty();
-
-        let dictionary = shared_vocab.borrow().dictionary();
-        let editor_state = Self::build_editor_state(
-            Some(content),
-            word_wrap,
-            line_numbers,
-            shared_vocab,
-            autocomplete_enabled,
-            window,
-            cx,
-        );
-        let underlines = spell_editor::create_underlines(&editor_state, cx);
-        let subscriptions = vec![Self::observe_editor(&editor_state, cx)];
-
-        let mut doc = Self {
+        let dirty = !content.is_empty();
+        Self {
             path: None,
-            title,
-            dirty: has_content,
-            editor_state,
-            underlines,
+            title: untitled_title(number),
+            dirty,
+            editor_state: Self::build_editor_state(Some(content), options, window, cx),
             content_hash: 0,
-            dictionary,
-            spell_enabled,
-            spell_scanner: SpellScanner::new(),
-            _spell_check_task: None,
-            _subscriptions: subscriptions,
-        };
-        doc.schedule_spell_check(cx);
-        doc
+        }
     }
 
-    /// Builds the editor state for a document.
-    ///
-    /// Documents use GPUI Kit's code editor with the plain-text language: no
-    /// syntax highlighting, but it is the editor that draws line numbers.
+    /// Builds the editor state for a document: GPUI Kit's text editor, with
+    /// jot's spell checker and word suggestions shown as ghost text.
     fn build_editor_state(
         content: Option<String>,
-        word_wrap: bool,
-        line_numbers: bool,
-        shared_vocab: Rc<RefCell<SharedVocabulary>>,
-        autocomplete_enabled: Rc<Cell<bool>>,
+        options: &EditorOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Entity<EditorState> {
+    ) -> Entity<TextareaState> {
+        let dictionary = options.shared_vocab.borrow().dictionary();
+        let completions = Rc::new(JotCompletionProvider::new(
+            options.shared_vocab.clone(),
+            options.autocomplete_enabled.clone(),
+        ));
         cx.new(|cx| {
-            let mut state = EditorState::new(window, cx)
-                .language("text")
-                .soft_wrap(word_wrap)
-                .line_number(line_numbers)
-                .searchable(true);
+            let mut state = TextareaState::new(window, cx)
+                .text_editor()
+                .soft_wrap(options.word_wrap)
+                .line_number(options.line_numbers)
+                .suggestion_provider(completions)
+                .suggestion_options(SuggestionOptions::default().menu(false).inline(true));
+            if dictionary.is_loaded() {
+                state = state.spell_checker(Rc::new(DocumentSpelling::new(dictionary)));
+            }
             if let Some(content) = content {
                 state = state.default_value(content);
             }
-            state.lsp_mut().completion_provider = Some(Rc::new(JotCompletionProvider::new(
-                shared_vocab,
-                autocomplete_enabled,
-            )));
+            state.set_spell_checking(options.spell_check, cx);
             state
         })
-    }
-
-    /// Subscribes to editor change events to keep spell checking current.
-    ///
-    /// The underlines move with the edited text in the meantime, so the
-    /// check can wait for a pause in typing.
-    fn observe_editor(editor_state: &Entity<EditorState>, cx: &mut Context<Self>) -> Subscription {
-        cx.subscribe(editor_state, |this, _, event: &InputEvent, cx| {
-            if let InputEvent::Change = event {
-                this.schedule_spell_check(cx);
-            }
-        })
-    }
-
-    /// Schedules a debounced spell check.
-    ///
-    /// Each call replaces (and thereby cancels) any pending check, so rapid
-    /// typing costs one task allocation per keystroke and a single scan runs
-    /// after the debounce interval of idle time.
-    pub fn schedule_spell_check(&mut self, cx: &mut Context<Self>) {
-        if !self.dictionary.is_loaded() {
-            return;
-        }
-        self._spell_check_task = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(SPELL_CHECK_DEBOUNCE).await;
-            this.update(cx, |doc, cx| {
-                doc.run_spell_check(cx);
-            })
-            .ok();
-        }));
-    }
-
-    /// Runs the spell scanner and underlines what it finds.
-    fn run_spell_check(&mut self, cx: &mut Context<Self>) {
-        if !self.spell_enabled.get() || !self.dictionary.is_loaded() {
-            spell_editor::set_underlines(&self.underlines, Vec::new(), cx);
-            return;
-        }
-
-        // Cloning a rope shares its chunks.
-        let (text, cursor) = {
-            let state = self.editor_state.read(cx);
-            (state.text().clone(), state.cursor_position())
-        };
-        let found = self
-            .spell_scanner
-            .scan(&self.dictionary, &text, Some(cursor));
-        let ranges: Vec<_> = found
-            .iter()
-            .map(|issue| {
-                text.position_to_offset(&Position::new(issue.line, issue.start_character))
-                    ..text.position_to_offset(&Position::new(issue.line, issue.end_character))
-            })
-            .collect();
-        spell_editor::set_underlines(&self.underlines, ranges, cx);
-    }
-
-    pub fn dictionary(&self) -> &Rc<Dictionary> {
-        &self.dictionary
     }
 
     pub fn content(&self, cx: &gpui_kit::App) -> String {
@@ -303,5 +154,12 @@ impl Document {
         let mut hasher = DefaultHasher::new();
         content.hash(&mut hasher);
         hasher.finish()
+    }
+}
+
+fn untitled_title(number: Option<u32>) -> SharedString {
+    match number {
+        Some(n) if n > 1 => format!("Untitled {}", n).into(),
+        _ => "Untitled".into(),
     }
 }

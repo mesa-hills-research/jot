@@ -1,8 +1,7 @@
-use super::{Document, Settings};
+use super::{Document, EditorOptions, Settings};
 use crate::actions::*;
 use crate::autocomplete::SharedVocabulary;
 use crate::components::View;
-use crate::spell::Dictionary;
 use gpui_kit::component::WindowExt;
 use gpui_kit::component::input::Position;
 use gpui_kit::{
@@ -30,7 +29,6 @@ pub struct AppState {
     pub active_index: usize,
     pub settings: Settings,
     pub autocomplete_enabled: Rc<Cell<bool>>,
-    pub spell_check_enabled: Rc<Cell<bool>>,
     pub shared_vocabulary: Rc<RefCell<SharedVocabulary>>,
     untitled_counter: u32,
     pub focus_handle: FocusHandle,
@@ -52,7 +50,6 @@ impl AppState {
         let focus_handle = cx.focus_handle();
         let settings = Settings::load();
         let autocomplete_enabled = Rc::new(Cell::new(settings.autocomplete));
-        let spell_check_enabled = Rc::new(Cell::new(settings.spell_check));
         let shared_vocabulary = Rc::new(RefCell::new(SharedVocabulary::load()));
 
         Self {
@@ -60,7 +57,6 @@ impl AppState {
             active_index: 0,
             settings,
             autocomplete_enabled,
-            spell_check_enabled,
             shared_vocabulary,
             untitled_counter: 1,
             focus_handle,
@@ -83,28 +79,27 @@ impl AppState {
         }
     }
 
-    /// Updates the spell-check setting and re-runs (or clears) the
-    /// underlines on every open document.
+    /// How a new document's editor starts out.
+    fn editor_options(&self) -> EditorOptions {
+        EditorOptions {
+            word_wrap: self.settings.word_wrap,
+            line_numbers: self.settings.line_numbers,
+            spell_check: self.settings.spell_check,
+            shared_vocab: self.shared_vocabulary.clone(),
+            autocomplete_enabled: self.autocomplete_enabled.clone(),
+        }
+    }
+
+    /// Updates the spell-check setting and checks (or clears) the underlines
+    /// of every open document.
     pub fn set_spell_check(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.settings.spell_check = enabled;
-        self.spell_check_enabled.set(enabled);
         self.settings.save();
-        self.recheck_spelling(cx);
-    }
-
-    /// Checks every open document again, after the dictionary changed.
-    pub fn recheck_spelling(&mut self, cx: &mut Context<Self>) {
         for doc in &self.documents {
-            doc.update(cx, |doc, cx| {
-                doc.schedule_spell_check(cx);
-            });
+            let editor_state = doc.read(cx).editor_state.clone();
+            editor_state.update(cx, |state, cx| state.set_spell_checking(enabled, cx));
         }
         cx.notify();
-    }
-
-    /// The dictionary every document checks against.
-    pub fn dictionary(&self) -> Rc<Dictionary> {
-        self.shared_vocabulary.borrow().dictionary()
     }
 
     pub fn new_untitled_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -115,24 +110,8 @@ impl AppState {
         };
         self.untitled_counter += 1;
 
-        let word_wrap = self.settings.word_wrap;
-        let line_numbers = self.settings.line_numbers;
-        let shared_vocab = self.shared_vocabulary.clone();
-        let autocomplete_enabled = self.autocomplete_enabled.clone();
-        let spell_enabled = self.spell_check_enabled.clone();
-
-        let document = cx.new(|cx| {
-            Document::new_untitled(
-                number,
-                word_wrap,
-                line_numbers,
-                shared_vocab,
-                autocomplete_enabled,
-                spell_enabled,
-                window,
-                cx,
-            )
-        });
+        let options = self.editor_options();
+        let document = cx.new(|cx| Document::new_untitled(number, &options, window, cx));
 
         self.documents.push(document);
         self.active_index = self.documents.len() - 1;
@@ -150,25 +129,9 @@ impl AppState {
                     return;
                 }
 
-                let word_wrap = self.settings.word_wrap;
-                let line_numbers = self.settings.line_numbers;
-                let shared_vocab = self.shared_vocabulary.clone();
-                let autocomplete_enabled = self.autocomplete_enabled.clone();
-                let spell_enabled = self.spell_check_enabled.clone();
-
-                let document = cx.new(|cx| {
-                    Document::from_path(
-                        path,
-                        content,
-                        word_wrap,
-                        line_numbers,
-                        shared_vocab,
-                        autocomplete_enabled,
-                        spell_enabled,
-                        window,
-                        cx,
-                    )
-                });
+                let options = self.editor_options();
+                let document =
+                    cx.new(|cx| Document::from_path(path, content, &options, window, cx));
 
                 self.documents.push(document);
                 self.active_index = self.documents.len() - 1;
@@ -206,25 +169,8 @@ impl AppState {
         };
         self.untitled_counter += 1;
 
-        let word_wrap = self.settings.word_wrap;
-        let line_numbers = self.settings.line_numbers;
-        let shared_vocab = self.shared_vocabulary.clone();
-        let autocomplete_enabled = self.autocomplete_enabled.clone();
-        let spell_enabled = self.spell_check_enabled.clone();
-
-        let document = cx.new(|cx| {
-            Document::from_template(
-                content,
-                number,
-                word_wrap,
-                line_numbers,
-                shared_vocab,
-                autocomplete_enabled,
-                spell_enabled,
-                window,
-                cx,
-            )
-        });
+        let options = self.editor_options();
+        let document = cx.new(|cx| Document::from_template(content, number, &options, window, cx));
 
         self.documents.push(document);
         self.active_index = self.documents.len() - 1;

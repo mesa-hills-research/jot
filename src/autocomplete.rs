@@ -51,12 +51,8 @@
 //! surface while genuine jargon can earn trust.
 
 use crate::spell::Dictionary;
-use gpui_kit::component::input::{CompletionProvider, Rope};
+use gpui_kit::component::input::{Suggestion, SuggestionProvider, SuggestionRequest};
 use gpui_kit::{App, Task, Window};
-use lsp_types::{
-    CompletionContext, CompletionResponse, InlineCompletionContext, InlineCompletionItem,
-    InlineCompletionResponse, InsertTextFormat,
-};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
@@ -1769,46 +1765,21 @@ impl JotCompletionProvider {
     }
 }
 
-impl CompletionProvider for JotCompletionProvider {
-    fn completions(
+/// Offers one word, or a short run of words, to continue the text at the
+/// caret. The text editor shows it as ghost text that Tab accepts.
+impl SuggestionProvider for JotCompletionProvider {
+    fn suggestions(
         &self,
-        _text: &Rope,
-        _offset: usize,
-        _trigger: CompletionContext,
+        request: &SuggestionRequest,
         _window: &mut Window,
         _cx: &mut App,
-    ) -> Task<anyhow::Result<CompletionResponse>> {
-        Task::ready(Ok(CompletionResponse::Array(Vec::new())))
-    }
-
-    fn is_completion_trigger(&self, _offset: usize, new_text: &str, _cx: &mut App) -> bool {
+    ) -> Task<anyhow::Result<Vec<Suggestion>>> {
         if !self.enabled.get() {
-            return false;
+            return Task::ready(Ok(Vec::new()));
         }
 
-        new_text.chars().any(|character| {
-            character.is_alphanumeric()
-                || character == '_'
-                || character == '-'
-                || character == ' '
-                || is_sentence_terminator(character)
-        })
-    }
-
-    fn inline_completion(
-        &self,
-        rope: &Rope,
-        offset: usize,
-        _trigger: InlineCompletionContext,
-        _window: &mut Window,
-        _cx: &mut App,
-    ) -> Task<anyhow::Result<InlineCompletionResponse>> {
-        if !self.enabled.get() {
-            return Task::ready(Ok(InlineCompletionResponse::Array(Vec::new())));
-        }
-
-        let text = rope.to_string();
-        let offset = floor_char_boundary(&text, offset.min(text.len()));
+        let text = request.text().to_string();
+        let offset = floor_char_boundary(&text, request.offset().min(text.len()));
 
         self.learn_preceding_sentence(&text, offset);
 
@@ -1824,17 +1795,20 @@ impl CompletionProvider for JotCompletionProvider {
             generate_suggestion(&shared, &local, &text, offset)
         };
 
-        let items = match suggestion {
-            Some(insert_text) => vec![InlineCompletionItem {
-                insert_text,
-                filter_text: None,
-                range: None,
-                command: None,
-                insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
-            }],
-            None => Vec::new(),
-        };
+        Task::ready(Ok(suggestion.into_iter().map(Suggestion::new).collect()))
+    }
 
-        Task::ready(Ok(InlineCompletionResponse::Array(items)))
+    fn is_trigger(&self, _offset: usize, text: &str, _cx: &mut App) -> bool {
+        if !self.enabled.get() {
+            return false;
+        }
+
+        text.chars().any(|character| {
+            character.is_alphanumeric()
+                || character == '_'
+                || character == '-'
+                || character == ' '
+                || is_sentence_terminator(character)
+        })
     }
 }

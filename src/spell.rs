@@ -16,7 +16,7 @@
 //!
 //! # Scanner
 //!
-//! [`SpellScanner`] produces [`SpellIssue`]s for a whole document, designed
+//! [`SpellScanner`] finds the misspelled words of a whole document, designed
 //! to run debounced on the UI thread:
 //!
 //! - Results are cached per line, keyed by a hash of the line's content, so
@@ -34,16 +34,23 @@
 //! (typos rarely change the first letter), then case-class agreement (a
 //! lowercase typo prefers lowercase corrections over proper nouns), then
 //! length proximity to the typed word, then alphabetically.
+//!
+//! # In the editor
+//!
+//! [`DocumentSpelling`] is the text editor's [`SpellChecker`]: the editor
+//! decides when to check and draws the underlines and the fixes, and the
+//! dictionary and scanner here decide what is misspelled and what to offer.
 
 use crate::assets::Assets;
 use crate::autocomplete::line_code_score;
-use gpui_kit::AssetSource;
-use gpui_kit::component::input::{Position, Rope, RopeExt};
+use gpui_kit::component::input::{Rope, RopeExt, SpellCheck, SpellCheckRequest, SpellChecker};
+use gpui_kit::{App, AssetSource, SharedString, Task};
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
@@ -57,6 +64,9 @@ const MIN_USEFUL_DICTIONARY_SIZE: usize = 10_000;
 
 /// Longest wordlist entry accepted at load time.
 const MAX_DICTIONARY_WORD_LEN: usize = 48;
+
+/// Most replacements offered for a misspelled word.
+const MAX_SUGGESTIONS: usize = 5;
 
 /// Maximum edit distance considered when generating correction suggestions.
 const MAX_EDIT_DISTANCE: usize = 2;
@@ -104,18 +114,25 @@ impl Dictionary {
     /// Loads the default dictionary from the embedded asset and any wordlist
     /// files found in the Jot config directory.
     pub fn load_default() -> Self {
-        let mut words: HashSet<Box<str>> = HashSet::new();
-
+        let mut wordlists = Vec::new();
         if let Ok(Some(data)) = Assets.load("dict/en.txt")
             && let Ok(content) = std::str::from_utf8(&data)
         {
-            Self::insert_wordlist(content, &mut words);
+            wordlists.push(content.to_string());
         }
-
         for path in Self::wordlist_paths() {
             if let Ok(content) = std::fs::read_to_string(&path) {
-                Self::insert_wordlist(&content, &mut words);
+                wordlists.push(content);
             }
+        }
+        Self::from_wordlists(wordlists.iter().map(String::as_str))
+    }
+
+    /// A dictionary of the words in `wordlists`.
+    fn from_wordlists<'a>(wordlists: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut words: HashSet<Box<str>> = HashSet::new();
+        for content in wordlists {
+            Self::insert_wordlist(content, &mut words);
         }
 
         let loaded = words.len() >= MIN_USEFUL_DICTIONARY_SIZE;
@@ -355,27 +372,65 @@ impl Dictionary {
     }
 }
 
-/// A misspelling located in a document, in editor [`Position`] coordinates
-/// (0-based line, 0-based character column).
-#[derive(Clone)]
-pub struct SpellIssue {
-    pub line: u32,
-    pub start_character: u32,
-    pub end_character: u32,
+/// A document's spell checking in the text editor.
+///
+/// Each document has its own, so the scanner's line cache follows that
+/// document, and they share the dictionary.
+pub struct DocumentSpelling {
+    dictionary: Rc<Dictionary>,
+    scanner: RefCell<SpellScanner>,
 }
 
-/// A misspelling within a single line, cached by line content.
-#[derive(Clone)]
-struct Misspelling {
-    start_character: u32,
-    end_character: u32,
+impl DocumentSpelling {
+    pub fn new(dictionary: Rc<Dictionary>) -> Self {
+        Self {
+            dictionary,
+            scanner: RefCell::new(SpellScanner::new()),
+        }
+    }
+}
+
+impl SpellChecker for DocumentSpelling {
+    /// Checks the whole document whatever lines were edited: whether a line is
+    /// code depends on its neighbours and on fences above it, and the
+    /// scanner's cache keeps unchanged lines cheap.
+    fn check(&self, request: &SpellCheckRequest, _: &mut App) -> Task<anyhow::Result<SpellCheck>> {
+        let text = request.text();
+        let misspelled = self.scanner.borrow_mut().scan(&self.dictionary, text);
+        Task::ready(Ok(SpellCheck {
+            checked: std::iter::once(0..text.len()).collect(),
+            misspelled,
+        }))
+    }
+
+    fn suggestions(&self, word: &str, _: &mut App) -> Vec<SharedString> {
+        self.dictionary
+            .suggest(word, MAX_SUGGESTIONS)
+            .into_iter()
+            .map(SharedString::from)
+            .collect()
+    }
+
+    fn add_to_dictionary(&self, word: &str, _: &mut App) {
+        self.dictionary.add_word(word);
+    }
+
+    /// Ignored words stay ignored in every document until jot closes.
+    fn ignore(&self, word: &str, _: &mut App) {
+        self.dictionary.ignore_word(word);
+    }
+
+    fn debounce(&self) -> Duration {
+        SPELL_CHECK_DEBOUNCE
+    }
 }
 
 /// Cached analysis for one unique line content.
 struct CachedLine {
     code_score: f64,
     is_fence: bool,
-    misspellings: Option<Rc<Vec<Misspelling>>>,
+    /// Byte ranges of the misspelled words within the line.
+    misspellings: Option<Rc<Vec<Range<usize>>>>,
 }
 
 /// Per-row working record for one scan pass.
@@ -401,16 +456,9 @@ impl SpellScanner {
         }
     }
 
-    /// Scans the document and returns all misspellings outside code regions.
-    ///
-    /// The token containing `cursor` (if any) is suppressed so the word
-    /// currently being typed never flickers a squiggle.
-    pub fn scan(
-        &mut self,
-        dictionary: &Dictionary,
-        text: &Rope,
-        cursor: Option<Position>,
-    ) -> Vec<SpellIssue> {
+    /// Scans the document and returns the byte ranges of all misspellings
+    /// outside code regions, in order.
+    pub fn scan(&mut self, dictionary: &Dictionary, text: &Rope) -> Vec<Range<usize>> {
         if !dictionary.is_loaded() || text.len() == 0 || text.len() > MAX_SPELL_DOCUMENT_BYTES {
             self.cache.clear();
             return Vec::new();
@@ -471,21 +519,12 @@ impl SpellScanner {
                 }
             };
 
-            for m in misspellings.iter() {
-                let at_cursor = cursor.is_some_and(|c| {
-                    c.line as usize == row
-                        && c.character >= m.start_character
-                        && c.character <= m.end_character
-                });
-                if at_cursor {
-                    continue;
-                }
-                issues.push(SpellIssue {
-                    line: row as u32,
-                    start_character: m.start_character,
-                    end_character: m.end_character,
-                });
-            }
+            let line_start = text.line_start_offset(row);
+            issues.extend(
+                misspellings
+                    .iter()
+                    .map(|word| line_start + word.start..line_start + word.end),
+            );
         }
 
         self.cache = new_cache;
@@ -522,8 +561,8 @@ fn is_token_char(c: char) -> bool {
     c.is_alphabetic() || c == '\'' || c == '\u{2019}' || c == '-'
 }
 
-/// Tokenizes one line and returns its misspellings with char-column spans.
-fn check_line(dictionary: &Dictionary, line: &str) -> Vec<Misspelling> {
+/// Tokenizes one line and returns the byte ranges of its misspellings.
+fn check_line(dictionary: &Dictionary, line: &str) -> Vec<Range<usize>> {
     let mut result = Vec::new();
     if line.len() < MIN_CHECK_TOKEN_CHARS {
         return result;
@@ -554,7 +593,7 @@ fn examine_token(
     chars: &[(usize, char)],
     raw_start: usize,
     raw_end: usize,
-    out: &mut Vec<Misspelling>,
+    out: &mut Vec<Range<usize>>,
 ) {
     let mut start = raw_start;
     let mut end = raw_end;
@@ -632,10 +671,11 @@ fn examine_token(
         return;
     }
 
-    out.push(Misspelling {
-        start_character: start as u32,
-        end_character: end as u32,
-    });
+    let end_byte = chars.get(end).map_or_else(
+        || chars[end - 1].0 + chars[end - 1].1.len_utf8(),
+        |&(offset, _)| offset,
+    );
+    out.push(chars[start].0..end_byte);
 }
 
 /// Determines whether a token sits at a sentence start, scanning back over
@@ -714,5 +754,32 @@ fn capitalize(s: &str) -> String {
     match chars.next() {
         None => String::new(),
         Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dictionary() -> Dictionary {
+        let words =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/dict/en.txt"))
+                .expect("the embedded wordlist");
+        let dictionary = Dictionary::from_wordlists([words.as_str()]);
+        assert!(dictionary.is_loaded());
+        dictionary
+    }
+
+    #[test]
+    fn misspellings_are_byte_ranges_of_the_document() {
+        let dictionary = dictionary();
+        let mut scanner = SpellScanner::new();
+        let text = Rope::from("Café notes.\nThis line is mispeled here.\n");
+        let found = scanner.scan(&dictionary, &text);
+        let words: Vec<String> = found
+            .iter()
+            .map(|range| text.slice(range.clone()).to_string())
+            .collect();
+        assert_eq!(words, ["mispeled"]);
     }
 }

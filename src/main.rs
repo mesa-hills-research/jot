@@ -12,7 +12,6 @@ mod autocomplete;
 mod chrome;
 mod components;
 mod spell;
-mod spell_editor;
 mod state;
 mod theme;
 

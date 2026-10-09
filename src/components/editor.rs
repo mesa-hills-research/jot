@@ -1,10 +1,11 @@
-use crate::spell_editor;
 use crate::state::{AppEvent, AppState};
 use gpui_kit::component::{
     ActiveTheme,
-    input::{Editor as EditorElement, EditorState, InputEvent, Position},
+    input::{InputEvent, Position, TextEditor, TextareaState},
 };
-use gpui_kit::{Entity, IntoElement, Render, Styled, Subscription, Window, div, prelude::*, px};
+use gpui_kit::{
+    Entity, IntoElement, Render, Styled, Subscription, Window, div, prelude::*, px, relative,
+};
 
 const VOID_ELEMENTS: &[&str] = &[
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
@@ -75,7 +76,7 @@ impl Editor {
 
     fn handle_text_change(
         &mut self,
-        editor_state: &Entity<EditorState>,
+        editor_state: &Entity<TextareaState>,
         app_state: &Entity<AppState>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -224,20 +225,18 @@ impl Render for Editor {
 
         if let Some(document) = document {
             let editor_state = document.read(cx).editor_state.clone();
-            spell_editor::on_spelling_actions(div(), &self.app_state)
+            div()
                 .flex_1()
                 .size_full()
                 .bg(cx.theme().background)
                 .overflow_hidden()
                 .child(
-                    // The editor takes the theme's code font unless told
-                    // otherwise, so the font and zoom go on the element.
-                    EditorElement::new(&editor_state)
-                        .appearance(false)
+                    // The text editor inherits the window's font, so the
+                    // editor font, zoom and row height go on the element.
+                    TextEditor::new(&editor_state)
                         .font_family(font_family)
                         .text_size(px(font_size))
-                        .context_menu(spell_editor::context_menu(document))
-                        .h_full()
+                        .line_height(relative(1.5))
                         .w_full(),
                 )
         } else {

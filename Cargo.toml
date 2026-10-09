@@ -17,7 +17,7 @@ winresource = "0.1"
 # With `tree-sitter` the kit reads the `highlight` section of jot's themes: the
 # editor colours and the error colour of the spelling underlines. Without it
 # the kit ignores that section.
-gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "58718fa85650a32e12296c2bd8a60810d0e7990c", features = ["tree-sitter"] }
+gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "308ed002521a5333d5bc93b232e6e4db23458558", features = ["tree-sitter"] }
 anyhow = "1.0"
 rust-embed = "8.5"
 serde = { version = "1.0", features = ["derive"] }
@@ -27,7 +27,6 @@ env_logger = "0.11"
 rfd = "0.15"
 dirs = "5.0"
 chrono = "0.4"
-lsp-types = "0.97"
 
 [profile.release]
 opt-level = 3
