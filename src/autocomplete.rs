@@ -15,7 +15,9 @@
 //! 2. **Words past the current one when they are likely too.** Words are
 //!    added after the first while the chance that the whole suggestion is
 //!    right stays high, and the length offered is the one that saves the
-//!    most keystrokes on average.
+//!    most keystrokes on average. Tab takes it all, and Ctrl+Right, or
+//!    Cmd+Right on macOS, takes its next word (see
+//!    [`crate::actions::suggestion_bindings`]).
 //!
 //! 3. **Words in any case.** "Thanks" and "thanks" are one word. A
 //!    suggestion keeps the letters typed and finishes the word in the form

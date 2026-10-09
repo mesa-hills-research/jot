@@ -98,7 +98,28 @@ pub fn init(settings: &Settings, cx: &mut App) {
     ];
 
     cx.bind_keys(bindings);
+    cx.bind_keys(suggestion_bindings());
     set_menus(settings, cx);
+}
+
+/// The key that takes the next word of a word suggestion, as in VS Code:
+/// Cmd+Right on macOS and Ctrl+Right elsewhere.
+///
+/// It is bound in every text input, whatever the keymap. With no suggestion
+/// offered, GPUI Kit's `AcceptSuggestionWord` passes the key on to the next
+/// binding, so it moves as the keymap has it move, such as to the end of the
+/// word. jot binds after the kit, so this binding is tried first.
+pub fn suggestion_bindings() -> Vec<KeyBinding> {
+    let key = if cfg!(target_os = "macos") {
+        "cmd-right"
+    } else {
+        "ctrl-right"
+    };
+    vec![KeyBinding::new(
+        key,
+        input::AcceptSuggestionWord,
+        Some("Input"),
+    )]
 }
 
 /// Sets the menus, which show the settings' Word Wrap and Line Numbers.

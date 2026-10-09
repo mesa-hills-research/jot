@@ -34,6 +34,16 @@ const AUTOCOMPLETE_MODES: [(AutocompleteMode, &str); 3] = [
     (AutocompleteMode::Eager, "Eager"),
 ];
 
+/// What the word suggestions row says about them, with the platform's key
+/// for taking one word.
+const WORD_SUGGESTIONS_HELP: &str = if cfg!(target_os = "macos") {
+    "Tab finishes a word from your writing, and Cmd+Right takes one word of a longer \
+     suggestion. Quiet waits until you pause."
+} else {
+    "Tab finishes a word from your writing, and Ctrl+Right takes one word of a longer \
+     suggestion. Quiet waits until you pause."
+};
+
 /// How wide the page's column of settings grows.
 const PAGE_WIDTH: f32 = 720.;
 
@@ -455,7 +465,7 @@ impl Render for SettingsPanel {
                 ),
                 row(
                     "Word suggestions",
-                    Some("Tab finishes a word from your writing. Quiet waits until you pause."),
+                    Some(WORD_SUGGESTIONS_HELP),
                     self.segmented(
                         "autocomplete",
                         &AUTOCOMPLETE_MODES,

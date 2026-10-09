@@ -84,13 +84,26 @@ impl Jot {
         vocabulary: Rc<RefCell<SharedVocabulary>>,
         content: Option<&str>,
     ) -> Self {
-        cx.update(gpui_kit::init);
+        Self::open_with_keymap(cx, mode, Keymap::Cua, vocabulary, content)
+    }
+
+    fn open_with_keymap(
+        cx: &mut TestAppContext,
+        mode: AutocompleteMode,
+        keymap: Keymap,
+        vocabulary: Rc<RefCell<SharedVocabulary>>,
+        content: Option<&str>,
+    ) -> Self {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.bind_keys(crate::actions::suggestion_bindings());
+        });
         let pacing = Rc::new(SuggestionPacing::new(mode));
         let options = EditorOptions {
             word_wrap: false,
             line_numbers: false,
             spell_check: false,
-            keymap: Keymap::Cua,
+            keymap,
             smooth_caret: false,
             shared_vocab: vocabulary.clone(),
             suggestion_pacing: pacing.clone(),
@@ -680,4 +693,57 @@ fn a_document_and_the_vocabulary_count_its_sentences_once(cx: &mut TestAppContex
     reopened.type_text("Next week we will cir");
     assert_eq!(reopened.ghost(), new.ghost());
     assert_eq!(new.ghost().as_deref(), Some("cle back on"));
+}
+
+/// The ghost text the editor shows: what taking the suggestion would add
+/// after the caret.
+fn shown_ghost(jot: &Jot) -> Option<String> {
+    jot.editor.read_with(&jot.cx, |state, _| {
+        let suggestion = state.suggestions().first()?;
+        let range = suggestion.range()?;
+        let typed = state.value()[range.start..state.cursor()].to_string();
+        let rest = suggestion.text().strip_prefix(typed.as_str())?;
+        (!rest.is_empty()).then(|| rest.to_string())
+    })
+}
+
+/// Ctrl+Right takes the next word of a suggestion and leaves the rest of it
+/// offered, in every keymap. With nothing offered it does what the keymap
+/// does: Standard and Emacs move along the line, Vim's insert mode has
+/// nothing on it.
+#[gpui_kit::test]
+fn the_next_word_key_takes_one_word(cx: &mut TestAppContext) {
+    let key = if cfg!(target_os = "macos") {
+        "cmd-right"
+    } else {
+        "ctrl-right"
+    };
+    for keymap in [Keymap::Cua, Keymap::Emacs, Keymap::Vim] {
+        let vocabulary = Rc::new(RefCell::new(vocabulary()));
+        let mut jot = Jot::open_with_keymap(cx, AutocompleteMode::Eager, keymap, vocabulary, None);
+        if keymap == Keymap::Vim {
+            jot.cx.simulate_keystrokes("i");
+        }
+        jot.type_text("he");
+        assert_eq!(
+            shown_ghost(&jot).as_deref(),
+            Some("llo world"),
+            "{keymap:?}"
+        );
+        jot.cx.simulate_keystrokes(key);
+        assert_eq!(jot.value(), "hello", "{keymap:?}");
+        assert_eq!(shown_ghost(&jot).as_deref(), Some(" world"), "{keymap:?}");
+        jot.cx.simulate_keystrokes(key);
+        assert_eq!(jot.value(), "hello world", "{keymap:?}");
+        assert_eq!(shown_ghost(&jot), None, "{keymap:?}");
+        // What it took counts as typed, so the sentence is learned.
+        jot.type_text(". So");
+        assert_eq!(count(&jot, "hello"), 41, "{keymap:?}");
+
+        jot.cx.simulate_keystrokes("home");
+        jot.cx.simulate_keystrokes(key);
+        let caret = jot.editor.read_with(&jot.cx, |state, _| state.cursor());
+        assert_eq!(caret > 0, keymap != Keymap::Vim, "{keymap:?}");
+        assert_eq!(jot.value(), "hello world. So", "{keymap:?}");
+    }
 }
