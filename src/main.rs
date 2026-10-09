@@ -34,6 +34,7 @@ fn main() {
         let settings = Settings::load();
         actions::init(&settings, cx);
         fonts::register_fonts(cx);
+        fonts::keep_mono_font(cx);
         load_themes(cx, &settings.theme);
 
         gpui_kit::open_window(chrome::window_options(cx), cx, |window, cx| {

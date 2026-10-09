@@ -3,6 +3,7 @@
 
 use crate::assets::Assets;
 use anyhow::{Context as _, anyhow};
+use gpui_kit::component::Theme;
 use gpui_kit::component::font_picker::FontCatalog;
 use gpui_kit::{App, AssetSource, SharedString};
 use std::borrow::Cow;
@@ -13,6 +14,9 @@ pub const DEFAULT_EDITOR_FONT: &str = "JetBrains Mono";
 
 /// The interface font.
 pub const UI_FONT: &str = "Work Sans";
+
+/// The interface's monospace font, which GPUI Kit draws keyboard shortcuts in.
+pub const MONO_FONT: &str = "JetBrains Mono";
 
 /// Font files jot reads from the fonts folder.
 const FONT_EXTENSIONS: [&str; 4] = ["ttf", "otf", "ttc", "otc"];
@@ -27,6 +31,18 @@ pub fn bundled_fonts() -> Vec<Cow<'static, [u8]>> {
     .into_iter()
     .filter_map(|path| Assets.load(path).ok().flatten())
     .collect()
+}
+
+/// Keeps the theme's monospace font on [`MONO_FONT`]. Applying a theme sets
+/// it back to the theme's own, the system's monospace font for jot's themes.
+pub fn keep_mono_font(cx: &mut App) {
+    fn keep(cx: &mut App) {
+        if Theme::global(cx).mono_font_family != MONO_FONT {
+            Theme::global_mut(cx).mono_font_family = MONO_FONT.into();
+        }
+    }
+    keep(cx);
+    cx.observe_global::<Theme>(keep).detach();
 }
 
 /// The folder for the font files the user added.

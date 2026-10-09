@@ -2,9 +2,6 @@
 
 mod dialogs;
 mod editor;
-// Not used yet.
-#[allow(dead_code)]
-mod kbd;
 mod settings_panel;
 mod status_bar;
 mod tab;
