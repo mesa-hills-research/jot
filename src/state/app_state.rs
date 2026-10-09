@@ -3,7 +3,7 @@ use crate::actions::*;
 use crate::autocomplete::SharedVocabulary;
 use crate::components::View;
 use gpui_kit::component::WindowExt;
-use gpui_kit::component::input::Position;
+use gpui_kit::component::input::{Keymap, Position};
 use gpui_kit::{
     App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, ParentElement,
     Subscription, Window,
@@ -85,6 +85,7 @@ impl AppState {
             word_wrap: self.settings.word_wrap,
             line_numbers: self.settings.line_numbers,
             spell_check: self.settings.spell_check,
+            keymap: self.settings.keymap,
             shared_vocab: self.shared_vocabulary.clone(),
             autocomplete_enabled: self.autocomplete_enabled.clone(),
         }
@@ -98,6 +99,17 @@ impl AppState {
         for doc in &self.documents {
             let editor_state = doc.read(cx).editor_state.clone();
             editor_state.update(cx, |state, cx| state.set_spell_checking(enabled, cx));
+        }
+        cx.notify();
+    }
+
+    /// Switches every open document, and new ones, to `keymap`.
+    pub fn set_keymap(&mut self, keymap: Keymap, cx: &mut Context<Self>) {
+        self.settings.keymap = keymap;
+        self.settings.save();
+        for doc in &self.documents {
+            let editor_state = doc.read(cx).editor_state.clone();
+            editor_state.update(cx, |state, cx| state.set_keymap(keymap, cx));
         }
         cx.notify();
     }

@@ -1,16 +1,16 @@
 use gpui_kit::SharedString;
+use gpui_kit::component::input::Keymap;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const ZOOM_LEVELS: &[u32] = &[50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300];
 
-/// Serde default so settings files written before the field existed still
-/// deserialize instead of silently resetting all settings.
-fn default_true() -> bool {
-    true
-}
-
+/// jot's settings, saved as JSON in `<config>/jot/settings.json`.
+///
+/// A field missing from the file takes its default, so files written before
+/// the field existed still load.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub theme: SharedString,
     pub font_family: SharedString,
@@ -19,11 +19,12 @@ pub struct Settings {
     pub line_numbers: bool,
     pub xml_auto_complete: bool,
     pub autocomplete: bool,
-    #[serde(default = "default_true")]
     pub spell_check: bool,
     pub tab_size: u32,
     pub restore_session: bool,
     pub zoom_level: u32,
+    /// The editor's keybinding scheme: `cua`, `emacs` or `vim`.
+    pub keymap: Keymap,
 }
 
 impl Default for Settings {
@@ -40,6 +41,7 @@ impl Default for Settings {
             tab_size: 4,
             restore_session: false,
             zoom_level: 100,
+            keymap: Keymap::Cua,
         }
     }
 }
@@ -92,5 +94,43 @@ impl Settings {
 
     pub fn effective_font_size(&self) -> f32 {
         self.font_size as f32 * (self.zoom_level as f32 / 100.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_without_newer_fields_load_with_their_defaults() {
+        let old = r#"{
+            "theme": "Gruvbox Dark",
+            "font_family": "JetBrains Mono",
+            "font_size": 16,
+            "word_wrap": true,
+            "line_numbers": true,
+            "xml_auto_complete": false,
+            "autocomplete": true,
+            "tab_size": 4,
+            "restore_session": false,
+            "zoom_level": 100
+        }"#;
+        let settings: Settings = serde_json::from_str(old).unwrap();
+        assert_eq!(settings.theme, "Gruvbox Dark");
+        assert_eq!(settings.font_size, 16);
+        assert!(settings.spell_check);
+        assert_eq!(settings.keymap, Keymap::Cua);
+    }
+
+    #[test]
+    fn keymap_round_trips() {
+        let settings = Settings {
+            keymap: Keymap::Vim,
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains(r#""keymap":"vim""#), "{json}");
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.keymap, Keymap::Vim);
     }
 }

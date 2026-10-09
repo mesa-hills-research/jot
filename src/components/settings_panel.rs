@@ -4,6 +4,8 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     h_flex,
+    input::Keymap,
+    radio::RadioGroup,
     select::{SearchableVec, Select, SelectEvent, SelectState},
     v_flex,
 };
@@ -11,6 +13,13 @@ use gpui_kit::{
     App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
+
+/// The keybinding schemes the editor offers, as the settings page names them.
+const KEYMAPS: [(Keymap, &str); 3] = [
+    (Keymap::Cua, "Standard"),
+    (Keymap::Emacs, "Emacs"),
+    (Keymap::Vim, "Vim"),
+];
 
 pub struct SettingsPanel {
     app_state: Entity<AppState>,
@@ -73,17 +82,8 @@ impl SettingsPanel {
 
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (current_theme, word_wrap, line_numbers, xml_auto_complete, autocomplete, spell_check) = {
-            let state = self.app_state.read(cx);
-            (
-                state.settings.theme.clone(),
-                state.settings.word_wrap,
-                state.settings.line_numbers,
-                state.settings.xml_auto_complete,
-                state.settings.autocomplete,
-                state.settings.spell_check,
-            )
-        };
+        let settings = self.app_state.read(cx).settings.clone();
+        let current_theme = settings.theme.clone();
 
         let themes = Self::get_theme_names(cx);
         self.theme_select.update(cx, |state, cx| {
@@ -149,7 +149,7 @@ impl Render for SettingsPanel {
                     .child(
                         Checkbox::new("word-wrap")
                             .label("Word Wrap")
-                            .checked(word_wrap)
+                            .checked(settings.word_wrap)
                             .on_click({
                                 let app_state = self.app_state.clone();
                                 move |checked, _, cx| {
@@ -165,7 +165,7 @@ impl Render for SettingsPanel {
                     .child(
                         Checkbox::new("line-numbers")
                             .label("Show Line Numbers")
-                            .checked(line_numbers)
+                            .checked(settings.line_numbers)
                             .on_click({
                                 let app_state = self.app_state.clone();
                                 move |checked, _, cx| {
@@ -181,7 +181,7 @@ impl Render for SettingsPanel {
                     .child(
                         Checkbox::new("xml-auto-complete")
                             .label("Auto-complete XML tags")
-                            .checked(xml_auto_complete)
+                            .checked(settings.xml_auto_complete)
                             .on_click({
                                 let app_state = self.app_state.clone();
                                 move |checked, _, cx| {
@@ -196,7 +196,7 @@ impl Render for SettingsPanel {
                     .child(
                         Checkbox::new("autocomplete")
                             .label("Inline Word Suggestions")
-                            .checked(autocomplete)
+                            .checked(settings.autocomplete)
                             .on_click({
                                 let app_state = self.app_state.clone();
                                 move |checked, _, cx| {
@@ -212,7 +212,7 @@ impl Render for SettingsPanel {
                     .child(
                         Checkbox::new("spell-check")
                             .label("Spell Check")
-                            .checked(spell_check)
+                            .checked(settings.spell_check)
                             .on_click({
                                 let app_state = self.app_state.clone();
                                 move |checked, _, cx| {
@@ -221,6 +221,31 @@ impl Render for SettingsPanel {
                                     });
                                 }
                             }),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_2()
+                            .child(div().text_sm().child("Keybindings"))
+                            .child(
+                                RadioGroup::horizontal("keymap")
+                                    .children(KEYMAPS.iter().map(|(_, label)| *label))
+                                    .selected_index(
+                                        KEYMAPS
+                                            .iter()
+                                            .position(|(keymap, _)| *keymap == settings.keymap),
+                                    )
+                                    .on_change({
+                                        let app_state = self.app_state.clone();
+                                        move |ix: &usize, _, cx| {
+                                            let Some((keymap, _)) = KEYMAPS.get(*ix) else {
+                                                return;
+                                            };
+                                            app_state.update(cx, |state, cx| {
+                                                state.set_keymap(*keymap, cx);
+                                            });
+                                        }
+                                    }),
+                            ),
                     ),
             )
     }

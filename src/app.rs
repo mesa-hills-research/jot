@@ -44,7 +44,7 @@ impl JotApp {
         let title_bar = cx.new(|cx| JotTitleBar::new(app_state.clone(), cx));
         let tab_bar = cx.new(|_| JotTabBar::new(app_state.clone()));
         let editor = cx.new(|cx| Editor::new(app_state.clone(), window, cx));
-        let status_bar = cx.new(|_| StatusBar::new(app_state.clone()));
+        let status_bar = cx.new(|cx| StatusBar::new(app_state.clone(), cx));
         let settings_panel = cx.new(|cx| SettingsPanel::new(app_state.clone(), window, cx));
         let goto_line_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Line number..."));

@@ -1,6 +1,6 @@
 use crate::autocomplete::{JotCompletionProvider, SharedVocabulary};
 use crate::spell::DocumentSpelling;
-use gpui_kit::component::input::{SuggestionOptions, TextareaState};
+use gpui_kit::component::input::{Keymap, SuggestionOptions, TextareaState};
 use gpui_kit::{AppContext, Context, Entity, SharedString, Window};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -12,6 +12,7 @@ pub struct EditorOptions {
     pub word_wrap: bool,
     pub line_numbers: bool,
     pub spell_check: bool,
+    pub keymap: Keymap,
     pub shared_vocab: Rc<RefCell<SharedVocabulary>>,
     pub autocomplete_enabled: Rc<Cell<bool>>,
 }
@@ -97,6 +98,7 @@ impl Document {
                 .text_editor()
                 .soft_wrap(options.word_wrap)
                 .line_number(options.line_numbers)
+                .keymap(options.keymap)
                 .suggestion_provider(completions)
                 .suggestion_options(SuggestionOptions::default().menu(false).inline(true));
             if dictionary.is_loaded() {
