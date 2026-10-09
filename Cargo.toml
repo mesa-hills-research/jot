@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Jot Contributors"]
 description = "A modern, cross-platform text editor built with GPUI"
-license = "MIT"
-repository = "https://github.com/jot-editor/jot"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mesa-hills-research/jot"
 build = "build.rs"
 
 [build-dependencies]
