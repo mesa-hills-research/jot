@@ -2,32 +2,36 @@
 //!
 //! # Design
 //!
-//! Suggestions are produced by an online-learned n-gram model over the text
-//! the user has actually typed, governed by four principles:
+//! Suggestions come from an n-gram model learned online from the text the
+//! user has typed, kept on their computer:
 //!
-//! 1. **Word completion first.** Candidates for the typed prefix are ranked
-//!    by a blend of unigram frequency and confidence-weighted bigram/trigram
-//!    evidence. Strong, concentrated contextual distributions can penalize
-//!    unseen alternatives, while sparse context still backs off safely to
-//!    unigram frequency.
+//! 1. **A calibrated probability.** For the word being typed, or the next
+//!    word after a space, the model estimates the probability that a word is
+//!    the one coming, from the one or two words before it in the sentence and
+//!    whether the sentence starts there. A suggestion shows when that
+//!    probability is at least one half, so it is right more often than not.
+//!    See [`model`].
 //!
-//! 2. **Confidence-gated continuation.** A suggestion is extended beyond the
-//!    current word only when the continuation is near-certain in the user's
-//!    own history. The winning candidate must dominate the runner-up, and
-//!    each appended word must pass conditional-probability and support
-//!    thresholds, with a cumulative probability floor.
+//! 2. **Words past the current one when they are likely too.** Words are
+//!    added after the first while the chance that the whole suggestion is
+//!    right stays high, and the length offered is the one that saves the
+//!    most keystrokes on average.
 //!
-//! 3. **Conservative grammatical preference.** When competing candidates
-//!    form an obvious singular/plural pair, nearby closed-class determiners
-//!    can adjust their ranking. This is a soft preference rather than a hard
-//!    grammar rule because spelling alone does not reliably identify part of
-//!    speech or noun-phrase structure.
+//! 3. **Words in any case.** "Thanks" and "thanks" are one word. A
+//!    suggestion keeps the letters typed and finishes the word in the form
+//!    the user usually writes it. See [`vocabulary`].
 //!
 //! 4. **Context awareness.** A language-agnostic classifier scores nearby
 //!    lines as code or prose using structural features against the strongest
 //!    prose signal, English function-word ratio. In prose context,
 //!    code-shaped candidates are filtered out. In code context, suggestions
 //!    come from the local document only and are never extended.
+//!
+//! The local per-document index adds the document's own words, such as
+//! pasted names and code identifiers, and rebuilds on a time throttle rather
+//! than on every keystroke. It counts only what the shared vocabulary
+//! doesn't already hold, so no text counts twice (see
+//! [`vocabulary::LocalIndex`]).
 //!
 //! # Learning
 //!
@@ -39,13 +43,10 @@
 //! sentence is learned once, however the document around it changes, and
 //! the text a document opens with isn't learned again (see [`learned`]).
 //!
-//! One-character English words `a`, `A`, and `I` are preserved. Other
-//! rejected tokens break the n-gram sequence so words on either side never
-//! become falsely adjacent.
-//!
-//! The local per-document index, which powers in-document completion
-//! including pasted content and code identifiers, rebuilds on a time
-//! throttle rather than on every keystroke.
+//! An apostrophe between two letters stays inside a word, so contractions
+//! such as "don't" are one word. One-character English words `a`, `A`, and
+//! `I` are preserved. Other rejected tokens break the n-gram sequence so
+//! words on either side never become falsely adjacent.
 //!
 //! # Spelling hygiene
 //!
@@ -60,43 +61,32 @@
 //! less often for words the user types past. See [`pacing`].
 
 mod learned;
+mod model;
 mod pacing;
 mod typed;
+mod vocabulary;
 
 pub use pacing::{AutocompleteMode, SuggestionPacing};
+pub use vocabulary::SharedVocabulary;
 
-use crate::spell::Dictionary;
 use gpui_kit::component::input::{
     Suggestion, SuggestionEvent, SuggestionProvider, SuggestionRequest, TextChange,
 };
 use gpui_kit::{App, Task, Window};
 use learned::LearnedSentences;
+use model::generate_suggestion;
 use pacing::Pacer;
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::cell::RefCell;
-use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 use typed::TypedText;
+use vocabulary::{LocalIndex, WordTally, tally};
 
 /// Current persisted model schema and tokenization version.
 const MODEL_VERSION: u32 = 2;
-
-/// Minimum typed-prefix length for frequency-only completion.
-const MIN_PREFIX_LEN: usize = 2;
-
-/// Minimum number of characters gathered for a completion candidate.
-const MIN_CANDIDATE_SUFFIX_LEN: usize = 1;
-
-/// Minimum combined frequency required to display a one-character suffix
-/// without contextual support.
-const ONE_CHAR_SUFFIX_MIN_FREQUENCY: u32 = 3;
 
 /// Minimum length of an ordinary learnable word.
 const MIN_WORD_LEN: usize = 2;
@@ -104,67 +94,18 @@ const MIN_WORD_LEN: usize = 2;
 /// Maximum length of a learnable word.
 const MAX_WORD_LEN: usize = 60;
 
-/// Persisted vocabulary size cap; learning freezes beyond this.
+/// Persisted vocabulary size cap.
 const VOCAB_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
-/// Upper bound on candidates gathered per trie prefix lookup.
-const CANDIDATE_CAP: usize = 512;
-
-/// Weight multiplier for occurrences in the current document.
-const LOCAL_FREQ_WEIGHT: f64 = 2.0;
-
-/// Score weight for bigram context evidence.
-const BIGRAM_WEIGHT: f64 = 1.5;
-
-/// Score weight for trigram context evidence.
-const TRIGRAM_WEIGHT: f64 = 2.5;
-
-/// Combined context count required to complete a single-character prefix.
-const SHORT_PREFIX_MIN_CONTEXT: u32 = 2;
-
-/// Support at which contextual evidence begins to receive substantial weight.
-const CONTEXT_RELIABILITY_SUPPORT: f64 = 3.0;
-
-/// Minimum successor-distribution support before an unseen candidate can be
-/// treated as weak contradictory evidence.
-const CONTEXT_MISS_MIN_TOTAL: u32 = 3;
-
-/// Strength of a confidence-weighted penalty for an unseen candidate.
-const CONTEXT_MISS_PENALTY: f64 = 0.75;
-
-/// Score adjustment for a candidate participating in a determiner-sensitive
-/// singular/plural pair.
-const NUMBER_AGREEMENT_WEIGHT: f64 = 1.25;
-
-/// Minimum successor support for extending a suggestion.
-const EXTEND_MIN_COUNT: u32 = 3;
-
-/// Minimum conditional probability for the first appended word.
-const EXTEND_FIRST_MIN_PROB: f64 = 0.6;
-
-/// Minimum conditional probability for the second appended word.
-const EXTEND_SECOND_MIN_PROB: f64 = 0.75;
-
-/// Cumulative probability floor across all appended words.
-const EXTEND_MIN_CUMULATIVE: f64 = 0.5;
+/// The most occurrences of one word the open document adds to the
+/// vocabulary's count, so one long document doesn't swamp it.
+const LOCAL_COUNT_CAP: u32 = 50;
 
 /// Maximum continuation words appended after completing a typed prefix.
 const PREFIX_CONTINUATION_LIMIT: usize = 2;
 
 /// Maximum continuation words appended after an empty-prefix prediction.
 const EMPTY_PREDICTION_CONTINUATION_LIMIT: usize = 1;
-
-/// Trigram support required for an empty-prefix prediction.
-const PREDICT_TRIGRAM_MIN_COUNT: u32 = 2;
-
-/// Trigram probability required for an empty-prefix prediction.
-const PREDICT_TRIGRAM_MIN_PROB: f64 = 0.5;
-
-/// Bigram support required for an empty-prefix prediction.
-const PREDICT_BIGRAM_MIN_COUNT: u32 = 4;
-
-/// Bigram probability required for an empty-prefix prediction.
-const PREDICT_BIGRAM_MIN_PROB: f64 = 0.6;
 
 /// Committed occurrences required before a non-dictionary word is suggested.
 const NON_DICTIONARY_MIN_SHARED_FREQ: u32 = 3;
@@ -174,9 +115,6 @@ const NON_DICTIONARY_MIN_LOCAL_FREQ: u32 = 2;
 
 /// Maximum length of a candidate offered in prose context.
 const PROSE_MAX_CANDIDATE_LEN: usize = 24;
-
-/// Minimum interval between full rebuilds of the local document index.
-const LOCAL_REBUILD_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Backward scan bound when extracting a committed sentence.
 const SENTENCE_SCAN_BYTES: usize = 1024;
@@ -199,8 +137,8 @@ const CLASSIFY_FORWARD_BYTES: usize = 1024;
 /// Mean weighted line score above which context is classified as code.
 const CODE_SCORE_THRESHOLD: f64 = 0.2;
 
-/// Common English closed-class words used both for prose classification and
-/// normalization of n-gram context keys.
+/// Common English closed-class words, the prose signal of the code/prose
+/// classifier.
 const FUNCTION_WORDS: &[&str] = &[
     "the", "be", "to", "of", "and", "a", "an", "in", "that", "have", "it", "for", "not", "on",
     "with", "he", "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "her",
@@ -208,77 +146,6 @@ const FUNCTION_WORDS: &[&str] = &[
     "was", "are", "were", "been", "has", "had", "can", "could", "should", "i", "another", "each",
     "every", "these", "those", "many", "several", "few", "both",
 ];
-
-struct TrieNode {
-    children: HashMap<char, TrieNode>,
-    is_terminal: bool,
-    frequency: u32,
-}
-
-impl TrieNode {
-    fn new() -> Self {
-        Self {
-            children: HashMap::new(),
-            is_terminal: false,
-            frequency: 0,
-        }
-    }
-
-    fn insert(&mut self, word: &str, freq: u32) {
-        let mut node = self;
-        for ch in word.chars() {
-            node = node.children.entry(ch).or_insert_with(TrieNode::new);
-        }
-        node.is_terminal = true;
-        node.frequency = node.frequency.max(freq);
-    }
-
-    fn find_prefix_node(&self, prefix: &str) -> Option<&TrieNode> {
-        let mut node = self;
-        for ch in prefix.chars() {
-            node = node.children.get(&ch)?;
-        }
-        Some(node)
-    }
-
-    /// Collects terminal descendants as `(suffix, frequency)` pairs.
-    fn collect_completions(&self, buf: &mut String, out: &mut Vec<(String, u32)>, cap: usize) {
-        if out.len() >= cap {
-            return;
-        }
-
-        if self.is_terminal && !buf.is_empty() {
-            out.push((buf.clone(), self.frequency));
-        }
-
-        for (&ch, child) in &self.children {
-            if out.len() >= cap {
-                return;
-            }
-            buf.push(ch);
-            child.collect_completions(buf, out, cap);
-            buf.pop();
-        }
-    }
-}
-
-/// Builds the composite key used to index trigram successor maps.
-fn trigram_key(w1: &str, w2: &str) -> String {
-    let mut key = String::with_capacity(w1.len() + 1 + w2.len());
-    key.push_str(w1);
-    key.push('\t');
-    key.push_str(w2);
-    key
-}
-
-/// Returns a normalized key for a word used as prior n-gram context.
-fn context_key(word: &str) -> Cow<'_, str> {
-    if is_function_word(word) {
-        Cow::Owned(word.to_ascii_lowercase())
-    } else {
-        Cow::Borrowed(word)
-    }
-}
 
 /// Canonicalizes safe single-character prediction tokens.
 fn canonical_prediction_word(word: &str) -> &str {
@@ -289,13 +156,6 @@ fn canonical_prediction_word(word: &str) -> &str {
     } else {
         word
     }
-}
-
-/// Builds a normalized trigram context key.
-fn normalized_trigram_key(w1: &str, w2: &str) -> String {
-    let first = context_key(w1);
-    let second = context_key(w2);
-    trigram_key(first.as_ref(), second.as_ref())
 }
 
 /// Hashes a string with the standard library's default hasher.
@@ -318,349 +178,11 @@ fn floor_char_boundary(text: &str, mut idx: usize) -> usize {
     idx
 }
 
-#[derive(Serialize, Deserialize)]
-struct VocabStore {
-    #[serde(default)]
-    version: u32,
-    #[serde(default)]
-    words: HashMap<String, u32>,
-    #[serde(default)]
-    bigrams: HashMap<String, HashMap<String, u32>>,
-    #[serde(default)]
-    trigrams: HashMap<String, HashMap<String, u32>>,
-}
-
-impl Default for VocabStore {
-    fn default() -> Self {
-        Self {
-            version: MODEL_VERSION,
-            words: HashMap::new(),
-            bigrams: HashMap::new(),
-            trigrams: HashMap::new(),
-        }
-    }
-}
-
-/// Read access shared by the persistent vocabulary and local document index.
-trait Lexicon {
-    fn trie(&self) -> &TrieNode;
-    fn bigram_successors(&self, word: &str) -> Option<&HashMap<String, u32>>;
-    fn trigram_successors(&self, w1: &str, w2: &str) -> Option<&HashMap<String, u32>>;
-
-    fn word_freq(&self, word: &str) -> u32 {
-        let word = canonical_prediction_word(word);
-        self.trie()
-            .find_prefix_node(word)
-            .filter(|node| node.is_terminal)
-            .map(|node| node.frequency)
-            .unwrap_or(0)
-    }
-
-    #[allow(dead_code)]
-    fn bigram_count(&self, w1: &str, w2: &str) -> u32 {
-        let successor = canonical_prediction_word(w2);
-        self.bigram_successors(w1)
-            .and_then(|map| map.get(successor))
-            .copied()
-            .unwrap_or(0)
-    }
-
-    #[allow(dead_code)]
-    fn trigram_count(&self, w1: &str, w2: &str, w3: &str) -> u32 {
-        let successor = canonical_prediction_word(w3);
-        self.trigram_successors(w1, w2)
-            .and_then(|map| map.get(successor))
-            .copied()
-            .unwrap_or(0)
-    }
-}
-
-/// The persistent, cross-document vocabulary learned from typed text.
-pub struct SharedVocabulary {
-    store: VocabStore,
-    trie: TrieNode,
-    dictionary: Rc<Dictionary>,
-    frozen: bool,
-    dirty: bool,
-}
-
-impl Lexicon for SharedVocabulary {
-    fn trie(&self) -> &TrieNode {
-        &self.trie
-    }
-
-    fn bigram_successors(&self, word: &str) -> Option<&HashMap<String, u32>> {
-        let key = context_key(word);
-        self.store.bigrams.get(key.as_ref())
-    }
-
-    fn trigram_successors(&self, w1: &str, w2: &str) -> Option<&HashMap<String, u32>> {
-        self.store.trigrams.get(&normalized_trigram_key(w1, w2))
-    }
-}
-
-impl SharedVocabulary {
-    /// Creates an empty vocabulary with no loaded dictionary.
-    pub fn new() -> Self {
-        Self {
-            store: VocabStore::default(),
-            trie: TrieNode::new(),
-            dictionary: Rc::new(Dictionary::empty()),
-            frozen: false,
-            dirty: false,
-        }
-    }
-
-    /// Loads the persisted vocabulary and migrates incompatible n-gram data.
-    pub fn load() -> Self {
-        let mut vocabulary = Self::new();
-        vocabulary.dictionary = Rc::new(Dictionary::load_default());
-
-        let Some(path) = Self::vocab_path() else {
-            return vocabulary;
-        };
-
-        if !path.exists() {
-            return vocabulary;
-        }
-
-        let Ok(data) = std::fs::read_to_string(&path) else {
-            return vocabulary;
-        };
-
-        let Ok(mut store) = serde_json::from_str::<VocabStore>(&data) else {
-            return vocabulary;
-        };
-
-        let migrated = store.version != MODEL_VERSION;
-        if migrated {
-            store.version = MODEL_VERSION;
-            store.bigrams.clear();
-            store.trigrams.clear();
-        }
-
-        for (word, &frequency) in &store.words {
-            vocabulary.trie.insert(word, frequency);
-        }
-
-        vocabulary.store = store;
-        vocabulary.dirty = migrated;
-
-        if !migrated && let Ok(metadata) = std::fs::metadata(&path) {
-            vocabulary.frozen = metadata.len() >= VOCAB_MAX_BYTES;
-        }
-
-        vocabulary
-    }
-
-    /// Returns the spelling dictionary shared with autocomplete hygiene.
-    pub fn dictionary(&self) -> Rc<Dictionary> {
-        self.dictionary.clone()
-    }
-
-    /// Persists the vocabulary if it has changed since the last save.
-    pub fn save(&mut self) {
-        if !self.dirty {
-            return;
-        }
-
-        let Some(path) = Self::vocab_path() else {
-            return;
-        };
-
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-
-        if let Ok(data) = serde_json::to_string(&self.store) {
-            if data.len() as u64 > VOCAB_MAX_BYTES {
-                self.frozen = true;
-                return;
-            }
-
-            if std::fs::write(&path, &data).is_ok() {
-                self.dirty = false;
-                self.frozen = false;
-            }
-        }
-    }
-
-    fn vocab_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|path| path.join("jot").join("vocabulary.json"))
-    }
-
-    fn learn_word(&mut self, word: &str) {
-        if self.frozen {
-            return;
-        }
-
-        let word = canonical_prediction_word(word);
-        let entry = self.store.words.entry(word.to_string()).or_insert(0);
-        *entry += 1;
-        self.trie.insert(word, *entry);
-        self.dirty = true;
-    }
-
-    fn learn_bigram(&mut self, w1: &str, w2: &str) {
-        if self.frozen {
-            return;
-        }
-
-        let first = context_key(w1).into_owned();
-        let second = canonical_prediction_word(w2).to_string();
-
-        *self
-            .store
-            .bigrams
-            .entry(first)
-            .or_default()
-            .entry(second)
-            .or_insert(0) += 1;
-
-        self.dirty = true;
-    }
-
-    fn learn_trigram(&mut self, w1: &str, w2: &str, w3: &str) {
-        if self.frozen {
-            return;
-        }
-
-        let key = normalized_trigram_key(w1, w2);
-        let successor = canonical_prediction_word(w3).to_string();
-
-        *self
-            .store
-            .trigrams
-            .entry(key)
-            .or_default()
-            .entry(successor)
-            .or_insert(0) += 1;
-
-        self.dirty = true;
-    }
-
-    /// Applies the prose trust gate before offering a word.
-    fn is_trusted(&self, word: &str, shared_freq: u32, local_freq: u32) -> bool {
-        if !self.dictionary.is_loaded() {
-            return true;
-        }
-
-        self.dictionary.is_correct(word)
-            || shared_freq >= NON_DICTIONARY_MIN_SHARED_FREQ
-            || local_freq >= NON_DICTIONARY_MIN_LOCAL_FREQ
-    }
-}
-
-/// Per-document index over the full current buffer.
-struct WordIndex {
-    root: TrieNode,
-    bigrams: HashMap<String, HashMap<String, u32>>,
-    trigrams: HashMap<String, HashMap<String, u32>>,
-    last_hash: u64,
-    last_rebuild: Option<Instant>,
-}
-
-impl Lexicon for WordIndex {
-    fn trie(&self) -> &TrieNode {
-        &self.root
-    }
-
-    fn bigram_successors(&self, word: &str) -> Option<&HashMap<String, u32>> {
-        let key = context_key(word);
-        self.bigrams.get(key.as_ref())
-    }
-
-    fn trigram_successors(&self, w1: &str, w2: &str) -> Option<&HashMap<String, u32>> {
-        self.trigrams.get(&normalized_trigram_key(w1, w2))
-    }
-}
-
-impl WordIndex {
-    fn new() -> Self {
-        Self {
-            root: TrieNode::new(),
-            bigrams: HashMap::new(),
-            trigrams: HashMap::new(),
-            last_hash: 0,
-            last_rebuild: None,
-        }
-    }
-
-    /// Rebuilds the local index when its throttle interval has elapsed.
-    fn rebuild_if_stale(&mut self, text: &str, cursor: usize) {
-        if let Some(last_rebuild) = self.last_rebuild
-            && last_rebuild.elapsed() < LOCAL_REBUILD_INTERVAL
-        {
-            return;
-        }
-
-        self.last_rebuild = Some(Instant::now());
-
-        let hash = hash_str(text);
-        if hash == self.last_hash {
-            return;
-        }
-
-        self.last_hash = hash;
-        self.root = TrieNode::new();
-        self.bigrams.clear();
-        self.trigrams.clear();
-
-        let sequences = extract_sentences_and_words(text, Some(cursor));
-        let mut frequencies: HashMap<&str, u32> = HashMap::new();
-
-        for sequence in &sequences {
-            for &word in sequence {
-                let word = canonical_prediction_word(word);
-                *frequencies.entry(word).or_insert(0) += 1;
-            }
-        }
-
-        for (word, frequency) in frequencies {
-            self.root.insert(word, frequency);
-        }
-
-        for sequence in &sequences {
-            for pair in sequence.windows(2) {
-                let first = context_key(pair[0]).into_owned();
-                let second = canonical_prediction_word(pair[1]).to_string();
-
-                *self
-                    .bigrams
-                    .entry(first)
-                    .or_default()
-                    .entry(second)
-                    .or_insert(0) += 1;
-            }
-
-            for triple in sequence.windows(3) {
-                let key = normalized_trigram_key(triple[0], triple[1]);
-                let successor = canonical_prediction_word(triple[2]).to_string();
-
-                *self
-                    .trigrams
-                    .entry(key)
-                    .or_default()
-                    .entry(successor)
-                    .or_insert(0) += 1;
-            }
-        }
-    }
-}
-
 /// Classification of the text surrounding the cursor.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TextContext {
     Prose,
     Code,
-}
-
-/// Number preference supplied by a nearby determiner.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum NumberPreference {
-    Neutral,
-    Singular,
-    Plural,
 }
 
 fn is_word_char(ch: char) -> bool {
@@ -779,6 +301,47 @@ fn extract_sentences_and_words(text: &str, cursor_offset: Option<usize>) -> Vec<
     sequences
 }
 
+/// The words of `text`, as byte ranges.
+fn word_tokens(text: &str) -> Vec<Range<usize>> {
+    let mut tokens = Vec::new();
+    let mut start = None;
+    for (index, character) in text.char_indices() {
+        if is_word_char_at(text, index, character) {
+            start.get_or_insert(index);
+        } else if let Some(start) = start.take() {
+            tokens.push(start..index);
+        }
+    }
+    if let Some(start) = start {
+        tokens.push(start..text.len());
+    }
+    tokens
+}
+
+/// The learnable words of a sentence, in runs that a token that isn't
+/// learnable, such as a number, ends. Each run says whether it opens the
+/// sentence.
+fn sentence_runs(sentence: &str) -> Vec<(bool, Vec<&str>)> {
+    let mut runs = Vec::new();
+    let mut current = Vec::new();
+    let mut current_opens = false;
+    for (index, range) in word_tokens(sentence).into_iter().enumerate() {
+        let word = &sentence[range];
+        if is_learnable_word(word) {
+            if current.is_empty() {
+                current_opens = index == 0;
+            }
+            current.push(word);
+        } else if !current.is_empty() {
+            runs.push((current_opens, std::mem::take(&mut current)));
+        }
+    }
+    if !current.is_empty() {
+        runs.push((current_opens, current));
+    }
+    runs
+}
+
 fn extract_prefix(text: &str, offset: usize) -> &str {
     if offset == 0 || offset > text.len() {
         return "";
@@ -843,57 +406,6 @@ fn previous_two_words(text: &str, from: usize) -> (Option<&str>, Option<&str>) {
         last.map(|(start, end)| &area[start..end]),
         previous.map(|(start, end)| &area[start..end]),
     )
-}
-
-/// Determines whether a word is a singular-oriented determiner.
-fn is_singular_determiner(word: &str) -> bool {
-    ["a", "an", "this", "that", "one", "another", "each", "every"]
-        .iter()
-        .any(|candidate| candidate.eq_ignore_ascii_case(word))
-}
-
-/// Determines whether a word is a plural-oriented determiner.
-fn is_plural_determiner(word: &str) -> bool {
-    ["these", "those", "many", "several", "few", "both"]
-        .iter()
-        .any(|candidate| candidate.eq_ignore_ascii_case(word))
-}
-
-/// Detects words that make a two-token determiner scope inference unsafe.
-fn breaks_determiner_scope(word: &str) -> bool {
-    [
-        "of", "to", "for", "with", "in", "on", "by", "from", "and", "or", "but", "which", "who",
-        "is", "are", "was", "were", "has", "have", "had",
-    ]
-    .iter()
-    .any(|candidate| candidate.eq_ignore_ascii_case(word))
-}
-
-/// Infers a conservative number preference from the nearest two words.
-fn number_preference(prev: Option<&str>, prev2: Option<&str>) -> NumberPreference {
-    if let Some(word) = prev {
-        if is_singular_determiner(word) {
-            return NumberPreference::Singular;
-        }
-
-        if is_plural_determiner(word) {
-            return NumberPreference::Plural;
-        }
-    }
-
-    if let (Some(intervening), Some(determiner)) = (prev, prev2)
-        && !breaks_determiner_scope(intervening)
-    {
-        if is_singular_determiner(determiner) {
-            return NumberPreference::Singular;
-        }
-
-        if is_plural_determiner(determiner) {
-            return NumberPreference::Plural;
-        }
-    }
-
-    NumberPreference::Neutral
 }
 
 /// Checks whether any non-whitespace content exists after the cursor on the
@@ -1242,484 +754,15 @@ fn is_prose_shaped(word: &str) -> bool {
     !(internal_upper && has_lower)
 }
 
-/// Lowercases the first ASCII character for sentence-start lookup.
-fn lower_first(text: &str) -> String {
-    let mut characters = text.chars();
-
-    match characters.next() {
-        Some(character) if character.is_ascii_uppercase() => {
-            let mut result = String::with_capacity(text.len());
-            result.push(character.to_ascii_lowercase());
-            result.push_str(characters.as_str());
-            result
-        }
-        _ => text.to_string(),
-    }
-}
-
-/// A completion candidate merged across shared and local lexicons.
-struct Candidate {
-    suffix: String,
-    shared: u32,
-    local: u32,
-}
-
-/// Gathers completion candidates for a prefix from one lexicon.
-fn add_candidates(
-    lexicon: &impl Lexicon,
-    lookup_prefix: &str,
-    is_local: bool,
-    output: &mut HashMap<String, Candidate>,
-) {
-    let Some(node) = lexicon.trie().find_prefix_node(lookup_prefix) else {
-        return;
-    };
-
-    let mut buffer = String::new();
-    let mut items = Vec::new();
-    node.collect_completions(&mut buffer, &mut items, CANDIDATE_CAP);
-
-    for (suffix, frequency) in items {
-        if suffix.chars().count() < MIN_CANDIDATE_SUFFIX_LEN {
-            continue;
-        }
-
-        let word = format!("{}{}", lookup_prefix, suffix);
-        let entry = output.entry(word).or_insert_with(|| Candidate {
-            suffix,
-            shared: 0,
-            local: 0,
-        });
-
-        if is_local {
-            entry.local = entry.local.max(frequency);
-        } else {
-            entry.shared = entry.shared.max(frequency);
-        }
-    }
-}
-
-/// Merges successor distributions and returns the candidate count, total
-/// support, and strongest successor count.
-fn merged_candidate_stats(
-    first: Option<&HashMap<String, u32>>,
-    second: Option<&HashMap<String, u32>>,
-    candidate: &str,
-) -> (u32, u32, u32) {
-    let candidate = canonical_prediction_word(candidate);
-    let mut totals: HashMap<&str, u32> = HashMap::new();
-
-    for map in [first, second].into_iter().flatten() {
-        for (word, count) in map {
-            *totals.entry(word.as_str()).or_insert(0) += *count;
-        }
-    }
-
-    let candidate_count = totals.get(candidate).copied().unwrap_or(0);
-    let total = totals.values().copied().sum();
-    let strongest = totals.values().copied().max().unwrap_or(0);
-
-    (candidate_count, total, strongest)
-}
-
-/// Converts successor statistics into confidence-weighted context evidence.
-fn contextual_score(count: u32, total: u32, strongest: u32, weight: f64) -> f64 {
-    if total == 0 {
-        return 0.0;
-    }
-
-    let reliability = total as f64 / (total as f64 + CONTEXT_RELIABILITY_SUPPORT);
-
-    if count > 0 {
-        let probability = count as f64 / total as f64;
-        return weight * reliability * (1.0 + count as f64).ln() * probability.sqrt();
-    }
-
-    if total < CONTEXT_MISS_MIN_TOTAL {
-        return 0.0;
-    }
-
-    let concentration = strongest as f64 / total as f64;
-
-    -weight * CONTEXT_MISS_PENALTY * reliability * concentration
-}
-
-/// Scores a candidate from unigram and confidence-weighted context evidence.
-fn candidate_score(
-    word: &str,
-    candidate: &Candidate,
-    prev: Option<&str>,
-    prev2: Option<&str>,
-    shared: &SharedVocabulary,
-    local: &WordIndex,
-) -> (f64, u32) {
-    let unigram = candidate.shared as f64 + LOCAL_FREQ_WEIGHT * candidate.local as f64;
-
-    let mut score = (1.0 + unigram).ln();
-    let mut context_count = 0;
-
-    if let Some(previous) = prev {
-        let (count, total, strongest) = merged_candidate_stats(
-            shared.bigram_successors(previous),
-            local.bigram_successors(previous),
-            word,
-        );
-
-        context_count += count;
-        score += contextual_score(count, total, strongest, BIGRAM_WEIGHT);
-
-        if let Some(previous_two) = prev2 {
-            let (count, total, strongest) = merged_candidate_stats(
-                shared.trigram_successors(previous_two, previous),
-                local.trigram_successors(previous_two, previous),
-                word,
-            );
-
-            context_count += count;
-            score += contextual_score(count, total, strongest, TRIGRAM_WEIGHT);
-        }
-    }
-
-    (score, context_count)
-}
-
-/// Determines whether the candidate map contains a singular form related to
-/// a possible plural candidate.
-fn has_singular_peer(word: &str, candidates: &HashMap<String, Candidate>) -> bool {
-    word.strip_suffix("es")
-        .is_some_and(|base| !base.is_empty() && candidates.contains_key(base))
-        || word
-            .strip_suffix('s')
-            .is_some_and(|base| !base.is_empty() && candidates.contains_key(base))
-}
-
-/// Determines whether the candidate map contains a plural form related to a
-/// possible singular candidate.
-fn has_plural_peer(word: &str, candidates: &HashMap<String, Candidate>) -> bool {
-    let with_s = format!("{}s", word);
-    let with_es = format!("{}es", word);
-
-    candidates.contains_key(&with_s) || candidates.contains_key(&with_es)
-}
-
-/// Applies a soft determiner-number adjustment when both inflectional forms
-/// are competing candidates.
-fn number_agreement_adjustment(
-    word: &str,
-    candidates: &HashMap<String, Candidate>,
-    preference: NumberPreference,
-) -> f64 {
-    let has_singular = has_singular_peer(word, candidates);
-    let has_plural = has_plural_peer(word, candidates);
-
-    match preference {
-        NumberPreference::Singular if has_plural => NUMBER_AGREEMENT_WEIGHT,
-        NumberPreference::Singular if has_singular => -NUMBER_AGREEMENT_WEIGHT,
-        NumberPreference::Plural if has_singular => NUMBER_AGREEMENT_WEIGHT,
-        NumberPreference::Plural if has_plural => -NUMBER_AGREEMENT_WEIGHT,
-        _ => 0.0,
-    }
-}
-
-/// Returns whether a one-character suffix is useful enough to display.
-fn should_display_one_character_suffix(candidate: &Candidate, context_count: u32) -> bool {
-    if candidate.suffix.chars().count() != 1 {
-        return true;
-    }
-
-    let combined_frequency =
-        candidate.shared + candidate.local.saturating_mul(LOCAL_FREQ_WEIGHT as u32);
-
-    context_count > 0 || combined_frequency >= ONE_CHAR_SUFFIX_MIN_FREQUENCY
-}
-
-/// Merges two successor maps and returns the best successor, its count, and
-/// total distribution support.
-fn merged_best(
-    first: Option<&HashMap<String, u32>>,
-    second: Option<&HashMap<String, u32>>,
-) -> Option<(String, u32, u32)> {
-    let mut totals: HashMap<&str, u32> = HashMap::new();
-
-    for map in [first, second].into_iter().flatten() {
-        for (word, count) in map {
-            *totals.entry(word.as_str()).or_insert(0) += *count;
-        }
-    }
-
-    if totals.is_empty() {
-        return None;
-    }
-
-    let total = totals.values().copied().sum();
-
-    let (word, count) = totals
-        .into_iter()
-        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(left.0)))?;
-
-    Some((word.to_string(), count, total))
-}
-
-/// Returns continuation statistics, preferring supported trigram evidence
-/// and backing off to bigram evidence otherwise.
-fn follow_stats(
-    shared: &SharedVocabulary,
-    local: &WordIndex,
-    prior: Option<&str>,
-    current: &str,
-) -> Option<(String, u32, u32)> {
-    if let Some(prior) = prior
-        && let Some(stats) = merged_best(
-            shared.trigram_successors(prior, current),
-            local.trigram_successors(prior, current),
-        )
-        && stats.1 >= EXTEND_MIN_COUNT
-    {
-        return Some(stats);
-    }
-
-    merged_best(
-        shared.bigram_successors(current),
-        local.bigram_successors(current),
-    )
-}
-
-fn valid_prediction(
-    shared: &SharedVocabulary,
-    local: &WordIndex,
-    previous: &str,
-    word: &str,
-) -> bool {
-    word != previous
-        && is_prose_shaped(word)
-        && shared.is_trusted(word, shared.word_freq(word), local.word_freq(word))
-}
-
-/// Predicts the next word after a completed word and a space.
-fn predict_next_word(
-    shared: &SharedVocabulary,
-    local: &WordIndex,
-    previous: &str,
-    previous_two: Option<&str>,
-) -> Option<String> {
-    if let Some(previous_two) = previous_two
-        && let Some((word, count, total)) = merged_best(
-            shared.trigram_successors(previous_two, previous),
-            local.trigram_successors(previous_two, previous),
-        )
-    {
-        let probability = count as f64 / total as f64;
-
-        if count >= PREDICT_TRIGRAM_MIN_COUNT
-            && probability >= PREDICT_TRIGRAM_MIN_PROB
-            && valid_prediction(shared, local, previous, &word)
-        {
-            return Some(word);
-        }
-    }
-
-    let (word, count, total) = merged_best(
-        shared.bigram_successors(previous),
-        local.bigram_successors(previous),
-    )?;
-
-    let probability = count as f64 / total as f64;
-
-    if count >= PREDICT_BIGRAM_MIN_COUNT
-        && probability >= PREDICT_BIGRAM_MIN_PROB
-        && valid_prediction(shared, local, previous, &word)
-    {
-        return Some(word);
-    }
-
-    None
-}
-
-/// Appends confidence-gated continuation words to a suggestion.
-fn extend_suggestion(
-    shared: &SharedVocabulary,
-    local: &WordIndex,
-    previous: Option<&str>,
-    first: &str,
-    output: &mut String,
-    limit: usize,
-) {
-    let mut prior = previous.map(str::to_string);
-    let mut last = first.to_string();
-    let mut cumulative = 1.0;
-
-    for step in 0..limit {
-        let Some((word, count, total)) = follow_stats(shared, local, prior.as_deref(), &last)
-        else {
-            break;
-        };
-
-        if total == 0 {
-            break;
-        }
-
-        let probability = count as f64 / total as f64;
-        cumulative *= probability;
-
-        let threshold = if step == 0 {
-            EXTEND_FIRST_MIN_PROB
-        } else {
-            EXTEND_SECOND_MIN_PROB
-        };
-
-        if count < EXTEND_MIN_COUNT || probability < threshold || cumulative < EXTEND_MIN_CUMULATIVE
-        {
-            break;
-        }
-
-        if word == last || !is_prose_shaped(&word) {
-            break;
-        }
-
-        if !shared.is_trusted(&word, shared.word_freq(&word), local.word_freq(&word)) {
-            break;
-        }
-
-        output.push(' ');
-        output.push_str(&word);
-        prior = Some(std::mem::replace(&mut last, word));
-    }
-}
-
-/// Generates an inline suggestion at the cursor.
-fn generate_suggestion(
-    shared: &SharedVocabulary,
-    local: &WordIndex,
-    text: &str,
-    offset: usize,
-) -> Option<String> {
-    if has_text_after_cursor_on_line(text, offset) {
-        return None;
-    }
-
-    let prefix = extract_prefix(text, offset);
-    let prefix_start = offset - prefix.len();
-
-    if has_closing_punctuation_before(text, prefix_start) {
-        return None;
-    }
-
-    let context = classify_context(text, offset);
-    let (previous, previous_two) = previous_two_words(text, prefix_start);
-    let prefix_characters = prefix.chars().count();
-
-    if prefix_characters == 0 {
-        if context == TextContext::Code || !text[..offset].ends_with(' ') {
-            return None;
-        }
-
-        let previous = previous?;
-        let first = predict_next_word(shared, local, previous, previous_two)?;
-
-        let mut result = first.clone();
-
-        extend_suggestion(
-            shared,
-            local,
-            Some(previous),
-            &first,
-            &mut result,
-            EMPTY_PREDICTION_CONTINUATION_LIMIT,
-        );
-
-        return Some(result);
-    }
-
-    let mut candidates = HashMap::new();
-    add_candidates(local, prefix, true, &mut candidates);
-
-    if context == TextContext::Prose {
-        add_candidates(shared, prefix, false, &mut candidates);
-
-        let lowered = lower_first(prefix);
-        if lowered != prefix {
-            add_candidates(shared, &lowered, false, &mut candidates);
-            add_candidates(local, &lowered, true, &mut candidates);
-        }
-    }
-
-    let preference = number_preference(previous, previous_two);
-    let mut scored = Vec::new();
-
-    for (word, candidate) in &candidates {
-        if context == TextContext::Prose {
-            if !is_prose_shaped(word) {
-                continue;
-            }
-
-            if !shared.is_trusted(word, candidate.shared, candidate.local) {
-                continue;
-            }
-        }
-
-        let (mut score, context_count) =
-            candidate_score(word, candidate, previous, previous_two, shared, local);
-
-        if context == TextContext::Prose {
-            score += number_agreement_adjustment(word, &candidates, preference);
-        }
-
-        if prefix_characters < MIN_PREFIX_LEN && context_count < SHORT_PREFIX_MIN_CONTEXT {
-            continue;
-        }
-
-        scored.push((score, context_count, word, candidate));
-    }
-
-    if scored.is_empty() {
-        return None;
-    }
-
-    scored.sort_by(|left, right| {
-        right
-            .0
-            .partial_cmp(&left.0)
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| left.2.chars().count().cmp(&right.2.chars().count()))
-            .then_with(|| left.2.cmp(right.2))
-    });
-
-    let best_score = scored[0].0;
-    let best_context_count = scored[0].1;
-    let best_word = scored[0].2.as_str();
-    let best_candidate = scored[0].3;
-
-    if !should_display_one_character_suffix(best_candidate, best_context_count) {
-        return None;
-    }
-
-    let mut result = best_candidate.suffix.clone();
-
-    if context == TextContext::Code {
-        return Some(result);
-    }
-
-    let dominant = scored.len() < 2 || best_score >= scored[1].0 + std::f64::consts::LN_2;
-
-    if dominant {
-        extend_suggestion(
-            shared,
-            local,
-            previous,
-            best_word,
-            &mut result,
-            PREFIX_CONTINUATION_LIMIT,
-        );
-    }
-
-    Some(result)
-}
-
 /// Inline completion provider backed by shared and local learned vocabulary.
 pub struct JotCompletionProvider {
     shared_vocab: Rc<RefCell<SharedVocabulary>>,
-    local_index: RefCell<WordIndex>,
+    local_index: RefCell<LocalIndex>,
     learned: RefCell<LearnedSentences>,
+    /// The words this document taught the shared vocabulary.
+    taught: RefCell<WordTally>,
+    /// The words the document opened with.
+    opened: RefCell<WordTally>,
     typed: RefCell<TypedText>,
     pacer: Pacer,
 }
@@ -1728,8 +771,10 @@ impl JotCompletionProvider {
     pub fn new(shared_vocab: Rc<RefCell<SharedVocabulary>>, pacing: Rc<SuggestionPacing>) -> Self {
         Self {
             shared_vocab,
-            local_index: RefCell::new(WordIndex::new()),
+            local_index: RefCell::new(LocalIndex::new()),
             learned: RefCell::new(LearnedSentences::default()),
+            taught: RefCell::new(WordTally::new()),
+            opened: RefCell::new(WordTally::new()),
             typed: RefCell::new(TypedText::default()),
             pacer: Pacer::new(pacing),
         }
@@ -1739,6 +784,7 @@ impl JotCompletionProvider {
     /// this session, so none of it is learned.
     pub fn opened_with(&self, text: &str) {
         self.learned.borrow_mut().opened_with(text);
+        *self.opened.borrow_mut() = tally(text);
     }
 
     /// Hears that the user took a suggestion with Tab or closed it with
@@ -1754,46 +800,51 @@ impl JotCompletionProvider {
             return;
         };
 
-        let typed = self.typed.borrow();
-        if typed.overlaps_untyped(range.clone())
-            || self
-                .learned
-                .borrow_mut()
-                .is_learned(text, range.clone(), &typed)
         {
-            return;
+            let typed = self.typed.borrow();
+            if typed.overlaps_untyped(range.clone())
+                || self
+                    .learned
+                    .borrow_mut()
+                    .is_learned(text, range.clone(), &typed)
+            {
+                return;
+            }
         }
 
         if classify_context(text, terminator_offset) == TextContext::Code {
             return;
         }
 
-        let sentence = &text[range.clone()];
-        let sequences = extract_sentences_and_words(sentence, None);
-
-        if sequences.is_empty() {
+        let words = self
+            .shared_vocab
+            .borrow_mut()
+            .learn_sentence(&text[range.clone()]);
+        if words.is_empty() {
             return;
         }
 
-        {
-            let mut shared = self.shared_vocab.borrow_mut();
-
-            for words in &sequences {
-                for &word in words {
-                    shared.learn_word(word);
-                }
-
-                for pair in words.windows(2) {
-                    shared.learn_bigram(pair[0], pair[1]);
-                }
-
-                for triple in words.windows(3) {
-                    shared.learn_trigram(triple[0], triple[1], triple[2]);
-                }
-            }
+        let mut taught = self.taught.borrow_mut();
+        for word in words {
+            *taught.entry(word.into()).or_default() += 1;
         }
-
         self.learned.borrow_mut().learned(text, range);
+        // The index counted the sentence as the document's own.
+        self.local_index.borrow_mut().mark_stale();
+    }
+
+    /// Brings the index of the document's words up to date, at most every
+    /// couple of seconds.
+    fn refresh_local_index(&self, text: &str, cursor: usize, now: Instant) {
+        let shared = self.shared_vocab.borrow();
+        self.local_index.borrow_mut().rebuild_if_stale(
+            text,
+            cursor,
+            now,
+            shared.counts(),
+            &self.taught.borrow(),
+            &self.opened.borrow(),
+        );
     }
 }
 
@@ -1838,12 +889,9 @@ impl SuggestionProvider for JotCompletionProvider {
         let text = request.text().to_string();
         let offset = floor_char_boundary(&text, request.offset().min(text.len()));
 
+        let now = cx.background_executor().now();
         self.learn_preceding_sentence(&text, offset);
-
-        {
-            let mut local = self.local_index.borrow_mut();
-            local.rebuild_if_stale(&text, offset);
-        }
+        self.refresh_local_index(&text, offset, now);
 
         let suggestion = {
             let shared = self.shared_vocab.borrow();
@@ -1851,7 +899,6 @@ impl SuggestionProvider for JotCompletionProvider {
 
             generate_suggestion(&shared, &local, &text, offset)
         };
-        let now = cx.background_executor().now();
         let suggestion = self.pacer.offer(&text, offset, suggestion, now);
         self.typed
             .borrow_mut()

@@ -19,13 +19,13 @@ use std::time::Duration;
 /// `world` follows `hello`.
 fn vocabulary() -> SharedVocabulary {
     let mut vocabulary = words(&[
-        ("hello", 20),
-        ("help", 5),
+        ("hello", 40),
+        ("help", 3),
         ("helium", 1),
         ("world", 10),
         ("wonder", 3),
     ]);
-    for _ in 0..4 {
+    for _ in 0..8 {
         vocabulary.learn_bigram("hello", "world");
     }
     vocabulary
@@ -189,7 +189,8 @@ fn ghosts(expected: &[Option<&str>]) -> Vec<Option<String>> {
 }
 
 /// In Eager, every keystroke brings the model's suggestion up at once, again
-/// after Escape and after typing past it.
+/// after Escape and after typing past it. A suggestion of one letter, which
+/// Tab would save nothing on, doesn't show.
 #[gpui_kit::test]
 fn eager_suggests_after_every_keystroke(cx: &mut TestAppContext) {
     let mut jot = Jot::new(cx, AutocompleteMode::Eager);
@@ -197,7 +198,7 @@ fn eager_suggests_after_every_keystroke(cx: &mut TestAppContext) {
     assert_eq!(
         jot.ghosts_while_typing("hello world he"),
         ghosts(&[
-            None,
+            Some("ello world"),
             Some("llo world"),
             Some("lo world"),
             Some("o world"),
@@ -206,10 +207,10 @@ fn eager_suggests_after_every_keystroke(cx: &mut TestAppContext) {
             Some("orld"),
             Some("rld"),
             Some("ld"),
-            Some("d"),
             None,
             None,
             None,
+            Some("ello world"),
             Some("llo world"),
         ])
     );
@@ -217,7 +218,13 @@ fn eager_suggests_after_every_keystroke(cx: &mut TestAppContext) {
     assert_eq!(jot.ghost(), None);
     assert_eq!(
         jot.ghosts_while_typing("lp he"),
-        ghosts(&[Some("lo world"), None, None, None, Some("llo world")])
+        ghosts(&[
+            Some("lo world"),
+            None,
+            None,
+            Some("ello world"),
+            Some("llo world")
+        ])
     );
     jot.cx.simulate_keystrokes("tab");
     assert_eq!(jot.value(), "hello world help hello world");
@@ -396,15 +403,7 @@ fn a_new_mode_applies_at_once(cx: &mut TestAppContext) {
 
 /// The words a jot document's vocabulary has learned, with their counts.
 fn learned(jot: &Jot) -> Vec<(String, u32)> {
-    let vocabulary = jot.vocabulary.borrow();
-    let mut words: Vec<(String, u32)> = vocabulary
-        .store
-        .words
-        .iter()
-        .map(|(word, &count)| (word.clone(), count))
-        .collect();
-    words.sort();
-    words
+    jot.vocabulary.borrow().word_counts()
 }
 
 fn counts(words: &[(&str, u32)]) -> Vec<(String, u32)> {
@@ -645,4 +644,40 @@ fn a_colon_before_a_space_reads_as_prose() {
             "{code}"
         );
     }
+}
+
+/// "Thanks" opening a sentence and "thanks" inside one are one word, so
+/// what follows both is offered after either.
+#[gpui_kit::test]
+fn a_word_in_another_case_is_the_same_word(cx: &mut TestAppContext) {
+    let mut jot = Jot::with_vocabulary(cx, AutocompleteMode::Eager, SharedVocabulary::new());
+    for _ in 0..4 {
+        jot.type_text("Thanks for the update. ");
+    }
+    for _ in 0..3 {
+        jot.type_text("Many thanks for the help. ");
+    }
+    jot.type_text("Tha");
+    assert_eq!(jot.ghost().as_deref(), Some("nks for the"));
+    jot.type_text("nks. Many tha");
+    assert_eq!(jot.ghost().as_deref(), Some("nks for the"));
+}
+
+/// The vocabulary and the document's own words don't count the same text
+/// twice: a document reopened with sentences it taught the vocabulary
+/// suggests what a new document does.
+#[gpui_kit::test]
+fn a_document_and_the_vocabulary_count_its_sentences_once(cx: &mut TestAppContext) {
+    let vocabulary = Rc::new(RefCell::new(SharedVocabulary::new()));
+    let mut first = Jot::open(cx, AutocompleteMode::Eager, vocabulary.clone(), None);
+    first.type_text("We will circle back on the budget. We will circle back on the plan. ");
+    let content = first.value();
+
+    let mut new = Jot::open(cx, AutocompleteMode::Eager, vocabulary.clone(), None);
+    new.type_text("Next week we will cir");
+    let mut reopened = Jot::open(cx, AutocompleteMode::Eager, vocabulary, Some(&content));
+    reopened.cx.simulate_keystrokes("ctrl-end");
+    reopened.type_text("Next week we will cir");
+    assert_eq!(reopened.ghost(), new.ghost());
+    assert_eq!(new.ghost().as_deref(), Some("cle back on"));
 }
