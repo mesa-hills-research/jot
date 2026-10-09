@@ -1,0 +1,37 @@
+jot
+Copyright 2026 Mesa Hills Research
+
+jot is licensed under the MIT License (LICENSE-MIT) or the Apache License,
+Version 2.0 (LICENSE-APACHE), at your option.
+
+jot bundles the third-party files below, each under its own license.
+
+
+JetBrains Mono (fonts/JetBrainsMono-Regular.ttf)
+  Copyright 2020 The JetBrains Mono Project Authors
+  (https://github.com/JetBrains/JetBrainsMono)
+  SIL Open Font License 1.1, in fonts/OFL-JetBrainsMono.txt
+
+Work Sans (fonts/WorkSans-Regular.ttf)
+  Copyright 2019 The Work Sans Project Authors
+  (https://github.com/weiweihuanghuang/Work-Sans)
+  SIL Open Font License 1.1, in fonts/OFL-WorkSans.txt
+
+Icons (assets/icons/*.svg)
+  From GPUI Component 0.5.0, now GPUI Kit
+  (https://github.com/longbridge/gpui-component)
+  Copyright 2024 - 2025 Longbridge
+  Apache License 2.0, in LICENSE-APACHE
+  All but six are Lucide icons (https://lucide.dev) under the ISC License, and
+  some of those come from Feather under the MIT License. Both licenses are in
+  assets/icons/LICENSE-LUCIDE. The other six are github.svg, resize-corner.svg
+  and the four window-*.svg buttons.
+
+Color themes (themes/)
+  adventure, alduin, ayu, catppuccin, everforest, fahrenheit, flexoki, gruvbox,
+  harper, hybrid, jellybeans, kibble, macos-classic, matrix, mellifluous,
+  molokai, solarized, spaceduck, tokyonight and twilight
+  Based on the themes of GPUI Component 0.5.0, most of them with changed colors
+  Copyright 2024 - 2025 Longbridge
+  Apache License 2.0, in LICENSE-APACHE
+  Each file names the author of its color scheme and links to the source.
