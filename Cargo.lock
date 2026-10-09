@@ -2326,7 +2326,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=57fcfde05942b7bea694b7eaeabb2e60ea131a84#57fcfde05942b7bea694b7eaeabb2e60ea131a84"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=299cb906534811084c5705b71cc1ccb829d009ae#299cb906534811084c5705b71cc1ccb829d009ae"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2366,7 +2366,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=57fcfde05942b7bea694b7eaeabb2e60ea131a84#57fcfde05942b7bea694b7eaeabb2e60ea131a84"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=299cb906534811084c5705b71cc1ccb829d009ae#299cb906534811084c5705b71cc1ccb829d009ae"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2411,7 +2411,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=57fcfde05942b7bea694b7eaeabb2e60ea131a84#57fcfde05942b7bea694b7eaeabb2e60ea131a84"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=299cb906534811084c5705b71cc1ccb829d009ae#299cb906534811084c5705b71cc1ccb829d009ae"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2422,7 +2422,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=57fcfde05942b7bea694b7eaeabb2e60ea131a84#57fcfde05942b7bea694b7eaeabb2e60ea131a84"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=299cb906534811084c5705b71cc1ccb829d009ae#299cb906534811084c5705b71cc1ccb829d009ae"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -2435,7 +2435,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=57fcfde05942b7bea694b7eaeabb2e60ea131a84#57fcfde05942b7bea694b7eaeabb2e60ea131a84"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=299cb906534811084c5705b71cc1ccb829d009ae#299cb906534811084c5705b71cc1ccb829d009ae"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -2449,8 +2449,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7f0bc3ebba070f8981b3f8e905a12f47d27794a30d029e59cdb9edf7a4b3360"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2521,8 +2520,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-apple"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfdd914311cd12894367c8b9908947bb0c27fd42f8b9a5ff7a0730551a83fa4c"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "anyhow",
  "async-task",
@@ -2551,8 +2549,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-collections"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c060863025dc3b8e90febad2d1f4ffd23a5d0dcedba39d3f6b7820ea2fdd3a0"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "gpui-pre-util",
  "indexmap",
@@ -2562,8 +2559,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-derive-refineable"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc834f30f5f49791e214f1fde01a009c7de91c9cd0a9f31dabfed130ba39e6cf"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2573,8 +2569,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-http-client"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d2935cf82333da3f41774e5757837756408f01356197b41c817ad2666034453"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -2594,8 +2589,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-linux"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1131746fad5c87b5de74dc9c73105655b0c820a2dd4bb247586573e7cf5720e"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -2639,8 +2633,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-macos"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d756813ff1cd741a502af60fd18869e0677795936d7349642b41c49f43120c0"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -2685,8 +2678,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-macros"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2ad26ca759364694cb55487bebff4c1b7dd6accab49990ff3cda6f7a818a9f4"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "heck 0.5.0",
  "proc-macro-crate",
@@ -2698,8 +2690,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-perf"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fcb288a506a476b6cbf97e6ec1cc0118db43f0ca91087588afa1c2d8cd4f842"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "gpui-pre-collections",
  "serde",
@@ -2709,8 +2700,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-platform"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e200b7b78836f1a0fc70767d971768e88f29d8b91b697285c15fb8e373635a3e"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -2724,8 +2714,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-refineable"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4042345bb5bd3ecbc5d15b21ed128154f462a992058d7038cd397631f5462338"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "gpui-pre-derive-refineable",
 ]
@@ -2783,8 +2772,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-scheduler"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4acd73345bc3c09f1b98c1b21eb4459ad8336f89bb2edcef619e11c5a08456e"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "async-task",
  "backtrace",
@@ -2800,8 +2788,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-shared-string"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "477529fd5aa90bff969785ee9a3938484d94aa5101cdf7b84719629c0345f98a"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "schemars",
  "serde",
@@ -2811,8 +2798,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-sum-tree"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ec0ec176d576b82aed716cf47185856b54ea9528caaf9d01787024689bfd824"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "gpui-pre-ztracing",
  "heapless",
@@ -2824,8 +2810,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-util"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1635ae7d0b05400bfa211ddef6c67dc8d9f223c463022c2b3bf2c1c14c6044f"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "anyhow",
  "log",
@@ -2835,8 +2820,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-util-macros"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01486fce7722e5d7d7e7bb71c719dfdcc6ed917112bdc7c56d0556fdb60d10ab"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "gpui-pre-perf",
  "quote",
@@ -2846,8 +2830,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-web"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "184776d0763e6889dd2842dcb1204c15055945f2bdfe926b5ef57bdbd1952a65"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -2875,8 +2858,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-wgpu"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "439c5421cafe1a7cf68d0c0ae5cc82b26fad6b0e6345ac98d20acaf1f2463914"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2902,8 +2884,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-windows"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "371f9bb13f97e3bea2f8b8e5e81232bb74d735153c244ae67f7400e743925b1c"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -2932,8 +2913,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-zlog"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bbe5b98630ef4bfed5a7105ec1062e78d571912bc491388f07ea22f2457c18b"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2944,8 +2924,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-ztracing"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f806400f6bda1fdd9fc627e158c0e44fb0c4b7767582a3621efcf92f4a850db7"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 dependencies = [
  "gpui-pre-zlog",
  "gpui-pre-ztracing-macro",
@@ -2956,8 +2935,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-ztracing-macro"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d337c9acf058238e45ce0570d8a5958439242889492f91ae2d8e324211a61ccd"
+source = "git+https://github.com/mesa-hills-research/gpui?rev=5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd#5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd"
 
 [[package]]
 name = "granit-parser"
@@ -7622,8 +7600,7 @@ dependencies = [
 [[package]]
 name = "wasm_thread"
 version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7516db7f32decdadb1c3b8deb1b7d78b9df7606c5cc2f6241737c2ab3a0258e"
+source = "git+https://github.com/zed-industries/wasm_thread?rev=0cf96c7708dfb97ccf3da50347e25edcf75d6937#0cf96c7708dfb97ccf3da50347e25edcf75d6937"
 dependencies = [
  "futures",
  "js-sys",
@@ -8660,17 +8637,15 @@ checksum = "163b33ed8786455e2fa5d72f554057ce3f3182425434f756cd39c99839d88e23"
 [[package]]
 name = "xim-ctext"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ac61a7062c40f3c37b6e82eeeef835d5cc7824b632a72784a89b3963c33284c"
+source = "git+https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c881b815a2b6cdfd6687988e84f8447d8"
 dependencies = [
  "encoding_rs",
 ]
 
 [[package]]
 name = "xim-parser"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5dcee45f89572d5a65180af3a84e7ddb24f5ea690a6d3aa9de231281544dd7b7"
+version = "0.2.1"
+source = "git+https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c881b815a2b6cdfd6687988e84f8447d8"
 dependencies = [
  "bitflags 2.13.1",
 ]
@@ -8871,15 +8846,14 @@ dependencies = [
 [[package]]
 name = "zed-font-kit"
 version = "0.14.1-zed"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3898e450f36f852edda72e3f985c34426042c4951790b23b107f93394f9bff5"
+source = "git+https://github.com/zed-industries/font-kit?rev=94b0f28166665e8fd2f53ff6d268a14955c82269#94b0f28166665e8fd2f53ff6d268a14955c82269"
 dependencies = [
  "bitflags 2.13.1",
  "byteorder",
  "core-foundation 0.10.1",
  "core-graphics 0.24.0",
  "core-text",
- "dirs 5.0.1",
+ "dirs 6.0.0",
  "dwrote",
  "float-ord",
  "freetype-sys",
@@ -8896,8 +8870,7 @@ dependencies = [
 [[package]]
 name = "zed-scap"
 version = "0.0.8-zed"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6b338d705ae33a43ca00287c11129303a7a0aa57b101b72a1c08c863f698ac8"
+source = "git+https://github.com/zed-industries/scap?rev=4afea48c3b002197176fb19cd0f9b180dd36eaac#4afea48c3b002197176fb19cd0f9b180dd36eaac"
 dependencies = [
  "anyhow",
  "cocoa 0.25.0",
@@ -8918,8 +8891,7 @@ dependencies = [
 [[package]]
 name = "zed-xim"
 version = "0.4.0-zed"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c0b46ed118eba34d9ba53d94ddc0b665e0e06a2cf874cfa2dd5dec278148642"
+source = "git+https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c881b815a2b6cdfd6687988e84f8447d8"
 dependencies = [
  "ahash",
  "hashbrown 0.14.5",
