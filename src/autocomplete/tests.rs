@@ -74,8 +74,17 @@ impl Jot {
         mode: AutocompleteMode,
         vocabulary: SharedVocabulary,
     ) -> Self {
+        Self::open(cx, mode, Rc::new(RefCell::new(vocabulary)), None)
+    }
+
+    /// A document with `content`, or a new one, learning into `vocabulary`.
+    fn open(
+        cx: &mut TestAppContext,
+        mode: AutocompleteMode,
+        vocabulary: Rc<RefCell<SharedVocabulary>>,
+        content: Option<&str>,
+    ) -> Self {
         cx.update(gpui_kit::init);
-        let vocabulary = Rc::new(RefCell::new(vocabulary));
         let pacing = Rc::new(SuggestionPacing::new(mode));
         let options = EditorOptions {
             word_wrap: false,
@@ -86,8 +95,12 @@ impl Jot {
             shared_vocab: vocabulary.clone(),
             suggestion_pacing: pacing.clone(),
         };
+        let content = content.map(str::to_string);
         let window = cx.open_window(size(px(600.), px(300.)), move |window, cx| {
-            let document = cx.new(|cx| Document::new_untitled(None, &options, window, cx));
+            let document = cx.new(|cx| match content {
+                Some(content) => Document::from_template(content, None, &options, window, cx),
+                None => Document::new_untitled(None, &options, window, cx),
+            });
             let editor = document.read(cx).editor_state.clone();
             Root {
                 editor,
@@ -549,4 +562,44 @@ fn undo_and_redo_learn_nothing(cx: &mut TestAppContext) {
         assert_eq!(jot.value(), "Ferns grow slowly.");
     });
     assert_eq!(learned, []);
+}
+
+/// How many times the vocabulary has learned `word`.
+fn count(jot: &Jot, word: &str) -> u32 {
+    learned(jot)
+        .into_iter()
+        .find(|(learned, _)| learned == word)
+        .map_or(0, |(_, count)| count)
+}
+
+/// A sentence is learned once, whatever happens around it: an edit above it
+/// doesn't make it new again, and reopening the document doesn't either. A
+/// second copy the user types is learned.
+#[gpui_kit::test]
+fn a_sentence_is_learned_once(cx: &mut TestAppContext) {
+    let learned = learned_in_both_modes(cx, |jot| {
+        jot.type_text("First line here.\nLet me know what you think. ");
+        jot.cx.simulate_keystrokes("ctrl-home");
+        jot.type_text("A");
+        jot.cx.simulate_keystrokes("ctrl-end");
+        jot.type_text("So");
+        assert_eq!(count(jot, "know"), 1);
+    });
+    assert_eq!(learned.len(), 9, "{learned:?}");
+
+    for mode in [AutocompleteMode::Eager, AutocompleteMode::Quiet] {
+        let vocabulary = Rc::new(RefCell::new(SharedVocabulary::new()));
+        let mut jot = Jot::open(cx, mode, vocabulary.clone(), None);
+        jot.type_text("Let me know what you think. ");
+        assert_eq!(count(&jot, "know"), 1);
+
+        let content = jot.value();
+        let mut reopened = Jot::open(cx, mode, vocabulary.clone(), Some(&content));
+        reopened.cx.simulate_keystrokes("ctrl-end");
+        reopened.type_text("So");
+        assert_eq!(reopened.value(), "Let me know what you think. So");
+        assert_eq!((count(&reopened, "know"), count(&reopened, "So")), (1, 0));
+        reopened.type_text(". Let me know what you think. Then");
+        assert_eq!((count(&reopened, "know"), count(&reopened, "So")), (2, 1));
+    }
 }

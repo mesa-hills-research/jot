@@ -109,6 +109,9 @@ impl Document {
             options.shared_vocab.clone(),
             options.suggestion_pacing.clone(),
         ));
+        if let Some(content) = &content {
+            completions.opened_with(content);
+        }
         let editor_state = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
                 .text_editor()

@@ -35,8 +35,9 @@
 //! learned at the first typed key after its terminator, a line break
 //! included, so a line ended by a blank line counts. It is skipped when any
 //! of it was pasted, undone or redone, or inserted by the program rather than
-//! typed (see [`typed`]), and when its context classifies as code. Learning is
-//! deduplicated by sentence occurrence rather than content alone.
+//! typed (see [`typed`]), and when its context classifies as code. Each
+//! sentence is learned once, however the document around it changes, and
+//! the text a document opens with isn't learned again (see [`learned`]).
 //!
 //! One-character English words `a`, `A`, and `I` are preserved. Other
 //! rejected tokens break the n-gram sequence so words on either side never
@@ -58,6 +59,7 @@
 //! [`AutocompleteMode`]: in Quiet, the default, after a pause in typing, and
 //! less often for words the user types past. See [`pacing`].
 
+mod learned;
 mod pacing;
 mod typed;
 
@@ -68,13 +70,14 @@ use gpui_kit::component::input::{
     Suggestion, SuggestionEvent, SuggestionProvider, SuggestionRequest, TextChange,
 };
 use gpui_kit::{App, Task, Window};
+use learned::LearnedSentences;
 use pacing::Pacer;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::path::PathBuf;
@@ -658,14 +661,6 @@ enum NumberPreference {
     Neutral,
     Singular,
     Plural,
-}
-
-/// Identity of a committed sentence occurrence already processed by a
-/// completion provider.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct LearnedOccurrence {
-    terminator_offset: usize,
-    sentence_hash: u64,
 }
 
 fn is_word_char(ch: char) -> bool {
@@ -1691,7 +1686,7 @@ fn generate_suggestion(
 pub struct JotCompletionProvider {
     shared_vocab: Rc<RefCell<SharedVocabulary>>,
     local_index: RefCell<WordIndex>,
-    learned_occurrences: RefCell<HashSet<LearnedOccurrence>>,
+    learned: RefCell<LearnedSentences>,
     typed: RefCell<TypedText>,
     pacer: Pacer,
 }
@@ -1701,10 +1696,16 @@ impl JotCompletionProvider {
         Self {
             shared_vocab,
             local_index: RefCell::new(WordIndex::new()),
-            learned_occurrences: RefCell::new(HashSet::new()),
+            learned: RefCell::new(LearnedSentences::default()),
             typed: RefCell::new(TypedText::default()),
             pacer: Pacer::new(pacing),
         }
+    }
+
+    /// Notes the text a document opened with. It isn't the user's typing in
+    /// this session, so none of it is learned.
+    pub fn opened_with(&self, text: &str) {
+        self.learned.borrow_mut().opened_with(text);
     }
 
     /// Hears that the user took a suggestion with Tab or closed it with
@@ -1714,24 +1715,19 @@ impl JotCompletionProvider {
     }
 
     /// Learns the most recently finished prose sentence before the cursor,
-    /// when the user typed all of it.
+    /// when the user typed all of it and it isn't learned already.
     fn learn_preceding_sentence(&self, text: &str, offset: usize) {
         let Some((range, terminator_offset)) = preceding_sentence(text, offset) else {
             return;
         };
-        let sentence = &text[range.clone()];
 
-        let sentence_hash = hash_str(sentence);
-        let occurrence = LearnedOccurrence {
-            terminator_offset,
-            sentence_hash,
-        };
-
-        if self.learned_occurrences.borrow().contains(&occurrence) {
-            return;
-        }
-
-        if self.typed.borrow().overlaps_untyped(range) {
+        let typed = self.typed.borrow();
+        if typed.overlaps_untyped(range.clone())
+            || self
+                .learned
+                .borrow_mut()
+                .is_learned(text, range.clone(), &typed)
+        {
             return;
         }
 
@@ -1739,13 +1735,12 @@ impl JotCompletionProvider {
             return;
         }
 
+        let sentence = &text[range.clone()];
         let sequences = extract_sentences_and_words(sentence, None);
 
         if sequences.is_empty() {
             return;
         }
-
-        let mut learned_any = false;
 
         {
             let mut shared = self.shared_vocab.borrow_mut();
@@ -1753,7 +1748,6 @@ impl JotCompletionProvider {
             for words in &sequences {
                 for &word in words {
                     shared.learn_word(word);
-                    learned_any = true;
                 }
 
                 for pair in words.windows(2) {
@@ -1766,9 +1760,7 @@ impl JotCompletionProvider {
             }
         }
 
-        if learned_any {
-            self.learned_occurrences.borrow_mut().insert(occurrence);
-        }
+        self.learned.borrow_mut().learned(text, range);
     }
 }
 
