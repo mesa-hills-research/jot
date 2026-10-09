@@ -401,8 +401,12 @@ impl Render for JotApp {
                     .child(self.title_bar.clone()),
             )
             .child(
+                // The space under the title bar, which a long settings page
+                // scrolls within.
                 self.bind_global_actions(v_flex(), cx)
-                    .size_full()
+                    .w_full()
+                    .flex_1()
+                    .min_h_0()
                     .track_focus(&self.focus_handle)
                     .when(current_view == View::Editor, |this| {
                         this.child(self.tab_bar.clone())
