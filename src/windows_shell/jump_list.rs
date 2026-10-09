@@ -8,7 +8,8 @@ use crate::instance::Kind;
 use gpui_kit::{App, Global, MenuItem};
 use std::path::{Path, PathBuf};
 
-/// Notes that the file at `path` was opened or saved, for the jump list.
+/// Notes that the file at `path` was opened or saved, for the jump list and
+/// Windows' recent items.
 pub fn file_used(path: &Path, cx: &mut App) {
     cx.add_recent_document(path);
     edit_recent(|recent| {
@@ -48,12 +49,7 @@ pub fn refresh(cx: &mut App) {
             let removed = cx
                 .update(|cx| {
                     let recent = edit_recent(|recent| recent.forget(&gone));
-                    let entries = recent
-                        .files()
-                        .iter()
-                        .map(|file| vec![file.clone()].into())
-                        .collect();
-                    cx.update_jump_list(tasks(), entries)
+                    cx.update_jump_list_with(tasks(), recent.jump_list())
                 })
                 .await;
             let removed: Vec<PathBuf> = removed.into_iter().flatten().collect();

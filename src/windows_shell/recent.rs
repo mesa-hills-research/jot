@@ -2,6 +2,7 @@
 //! list shows.
 
 use super::same_path;
+use gpui_kit::{JumpListIcon, JumpListRecent};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -49,6 +50,22 @@ impl RecentFiles {
         self.files
             .retain(|file| !paths.iter().any(|path| same_path(file, path)));
         self.files.len() != before
+    }
+
+    /// The files as the jump list's Recent category, each with jot's icon.
+    /// Choosing one opens it in jot.
+    pub fn jump_list(&self) -> JumpListRecent {
+        JumpListRecent {
+            title: "Recent".into(),
+            entries: self
+                .files
+                .iter()
+                .map(|file| vec![file.clone()].into())
+                .collect(),
+            icon: JumpListIcon::App,
+            // Windows' own list would show the same files again.
+            system_recent: false,
+        }
     }
 }
 
@@ -99,6 +116,23 @@ mod tests {
         assert_eq!(RecentFiles::from_json(&recent.to_json()), recent);
         assert_eq!(RecentFiles::from_json("{not json"), RecentFiles::default());
         assert_eq!(RecentFiles::from_json("{}"), RecentFiles::default());
+    }
+
+    #[test]
+    fn the_jump_list_shows_the_files_as_recent_with_jots_icon() {
+        let mut recent = RecentFiles::default();
+        recent.add(&path("a.txt"));
+        recent.add(&path("b.md"));
+        let category = recent.jump_list();
+        assert_eq!(category.title, "Recent");
+        assert_eq!(category.icon, JumpListIcon::App);
+        assert!(!category.system_recent);
+        let entries: Vec<Vec<PathBuf>> = category
+            .entries
+            .iter()
+            .map(|entry| entry.to_vec())
+            .collect();
+        assert_eq!(entries, [vec![path("b.md")], vec![path("a.txt")]]);
     }
 
     #[cfg(unix)]

@@ -14,7 +14,7 @@ winresource = "0.1"
 [dependencies]
 # GPUI Kit from Mesa Hills Research's fork. It pins the matching gpui-pre release
 # and re-exports it, so GPUI is `gpui_kit::*` and needs no entry of its own.
-gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "77cfe658553933656ef3931491e55372644ed8ac" }
+gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "e56ac2a487ceaac6a0cb14c9ab6d096ae2fa35e2" }
 anyhow = "1.0"
 rust-embed = "8.5"
 serde = { version = "1.0", features = ["derive"] }
@@ -54,34 +54,34 @@ windows-registry = "0.6"
 [dev-dependencies]
 # The same GPUI Kit, with GPUI's test harness for tests that type into a real
 # text editor on a fake clock.
-gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "77cfe658553933656ef3931491e55372644ed8ac", features = ["test-support"] }
+gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "e56ac2a487ceaac6a0cb14c9ab6d096ae2fa35e2", features = ["test-support"] }
 
 # The gpui crates from Mesa Hills Research's fork, at the rev the pinned GPUI Kit names in its
 # own [patch.crates-io]. Cargo applies only this workspace's patches, so the kit's patch doesn't
 # reach jot. Move the rev with the kit pin.
 [patch.crates-io]
-gpui-pre                   = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-apple             = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-collections       = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-derive-refineable = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-http-client       = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-linux             = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-macos             = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-macros            = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-perf              = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-platform          = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-refineable        = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-scheduler         = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-shared-string     = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-sum-tree          = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-util              = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-util-macros       = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-web               = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-wgpu              = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-windows           = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-zlog              = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-ztracing          = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
-gpui-pre-ztracing-macro    = { git = "https://github.com/mesa-hills-research/gpui", rev = "5d00ce2d66971d9a4c13c14d5bebac9b1f1bc4dd" }
+gpui-pre                   = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-apple             = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-collections       = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-derive-refineable = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-http-client       = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-linux             = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-macos             = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-macros            = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-perf              = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-platform          = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-refineable        = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-scheduler         = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-shared-string     = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-sum-tree          = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-util              = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-util-macros       = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-web               = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-wgpu              = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-windows           = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-zlog              = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-ztracing          = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
+gpui-pre-ztracing-macro    = { git = "https://github.com/mesa-hills-research/gpui", rev = "3ee85e86ba0c3cffb4275f459de36a47b0b5a6ea" }
 
 [profile.release]
 opt-level = 3
