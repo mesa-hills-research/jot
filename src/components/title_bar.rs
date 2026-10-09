@@ -1,24 +1,31 @@
-//! Title bar containing the menu and other window controls.
+//! Title bar containing the menus and the window controls.
 
 use crate::chrome;
-use crate::components::MenuBar;
 use crate::state::AppState;
-use gpui_kit::component::{ActiveTheme, Icon, Sizable, TitleBar, h_flex};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable, TitleBar, h_flex, menu::AppMenuBar};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
-    Div, Entity, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, div, px,
+    App, Context, Div, Entity, InteractiveElement, IntoElement, ParentElement, Render, Styled,
+    Window, div, px,
 };
 
 pub struct JotTitleBar {
     app_state: Entity<AppState>,
-    menu_bar: Entity<MenuBar>,
+    /// The menus on Windows and Linux. macOS shows them in the menu bar.
+    menu_bar: Entity<AppMenuBar>,
 }
 
 impl JotTitleBar {
-    pub fn new(app_state: Entity<AppState>, menu_bar: Entity<MenuBar>) -> Self {
+    pub fn new(app_state: Entity<AppState>, cx: &mut App) -> Self {
         Self {
             app_state,
-            menu_bar,
+            menu_bar: AppMenuBar::new(cx),
         }
+    }
+
+    /// Picks up menus changed with `actions::set_menus`.
+    pub fn reload_menus(&mut self, cx: &mut Context<Self>) {
+        self.menu_bar.update(cx, |menu_bar, cx| menu_bar.reload(cx));
     }
 }
 
@@ -65,7 +72,9 @@ impl Render for JotTitleBar {
                                     .with_size(px(5.5))
                                     .text_color(cx.theme().foreground),
                             )
-                            .child(title_bar_item(self.menu_bar.clone())),
+                            .when(!cfg!(target_os = "macos"), |this| {
+                                this.child(title_bar_item(self.menu_bar.clone()))
+                            }),
                     )
                     .child(
                         div().flex_1().flex().items_center().justify_center().child(

@@ -1,7 +1,7 @@
 use crate::actions::*;
 use crate::chrome;
 use crate::components::{
-    Editor, JotTabBar, JotTitleBar, MenuBar, SettingsPanel, StatusBar, View, close_tab_with_prompt,
+    Editor, JotTabBar, JotTitleBar, SettingsPanel, StatusBar, View, close_tab_with_prompt,
 };
 use crate::state::{AppEvent, AppState};
 use gpui_kit::component::{
@@ -41,8 +41,7 @@ impl JotApp {
             state.new_untitled_document(window, cx);
         });
 
-        let menu_bar = MenuBar::build(app_state.clone(), cx);
-        let title_bar = cx.new(|_| JotTitleBar::new(app_state.clone(), menu_bar));
+        let title_bar = cx.new(|cx| JotTitleBar::new(app_state.clone(), cx));
         let tab_bar = cx.new(|_| JotTabBar::new(app_state.clone()));
         let editor = cx.new(|cx| Editor::new(app_state.clone(), window, cx));
         let status_bar = cx.new(|_| StatusBar::new(app_state.clone()));
@@ -70,6 +69,11 @@ impl JotApp {
                 self.app_state.update(cx, |state, cx| {
                     state.apply_settings_to_all_docs(window, cx);
                 });
+                // The View menu shows Word Wrap and Line Numbers.
+                let settings = self.app_state.read(cx).settings.clone();
+                set_menus(&settings, cx);
+                self.title_bar
+                    .update(cx, |title_bar, cx| title_bar.reload_menus(cx));
             }
             _ => {}
         }
@@ -290,6 +294,8 @@ impl JotApp {
             }))
             // Not a listener: the close check reads this view.
             .on_action(|_: &CloseWindow, window, cx| chrome::close_window(window, cx))
+            .on_action(|_: &Minimize, window, _| window.minimize_window())
+            .on_action(|_: &Zoom, window, _| window.zoom_window())
             .on_action(cx.listener(|this, action: &ZoomIn, window, cx| {
                 this.app_state.update(cx, |state, cx| {
                     state.on_zoom_in(action, window, cx);

@@ -31,9 +31,9 @@ fn main() {
         gpui_kit::init(cx);
         // jot is one window: closing it quits, on macOS too.
         cx.set_quit_mode(QuitMode::LastWindowClosed);
-        actions::init(cx);
-        load_fonts(cx);
         let settings = Settings::load();
+        actions::init(&settings, cx);
+        load_fonts(cx);
         load_themes(cx, &settings.theme);
 
         gpui_kit::open_window(chrome::window_options(cx), cx, |window, cx| {

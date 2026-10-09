@@ -3,7 +3,6 @@
 mod dialogs;
 mod editor;
 mod kbd;
-mod menu_bar;
 mod settings_panel;
 mod status_bar;
 mod tab;
@@ -12,7 +11,6 @@ mod title_bar;
 
 pub use dialogs::*;
 pub use editor::*;
-pub use menu_bar::*;
 pub use settings_panel::*;
 pub use status_bar::*;
 pub use tab::*;
