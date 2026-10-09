@@ -23,6 +23,15 @@
 //! halves of contractions they split ("doesn" from "doesn't") joined again.
 //! Files without a version keep their word counts and drop their n-grams,
 //! which an older tokenizer produced.
+//!
+//! # Saving
+//!
+//! jot saves the vocabulary when a file is saved, a tab or the window closes,
+//! and jot quits, and every few minutes while it has learned something new.
+//! The file is written whole beside the old one, which it then replaces, so
+//! a crash leaves one or the other. Near its size cap the vocabulary drops
+//! the entries it has seen least, and goes on learning. A file that doesn't
+//! parse is kept aside rather than written over.
 
 use super::{
     LOCAL_COUNT_CAP, MODEL_VERSION, NON_DICTIONARY_MIN_LOCAL_FREQ, NON_DICTIONARY_MIN_SHARED_FREQ,
@@ -34,7 +43,8 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::io::{self, Write as _};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -287,6 +297,22 @@ impl Counts {
         }
     }
 
+    /// Drops the entries of `level` seen `floor` times or fewer.
+    fn prune(&mut self, level: Level, floor: u32) {
+        match level {
+            Level::Words => {
+                self.words.retain(|_, forms| forms.count > floor);
+                self.total = self
+                    .words
+                    .values()
+                    .map(|forms| u64::from(forms.count))
+                    .sum();
+            }
+            Level::Bigrams => prune_successors(&mut self.bigrams, floor),
+            Level::Trigrams => prune_successors(&mut self.trigrams, floor),
+        }
+    }
+
     /// Counts loaded from a file: keys folded and contraction halves joined.
     fn from_saved(saved: SavedVocabulary) -> Self {
         let mut counts = Self::default();
@@ -313,6 +339,85 @@ impl Counts {
             }
         }
         counts
+    }
+}
+
+/// The kinds of entries in [`Counts`].
+#[derive(Clone, Copy)]
+enum Level {
+    Words,
+    Bigrams,
+    Trigrams,
+}
+
+/// Drops the successors seen `floor` times or fewer, and the contexts left
+/// with none.
+fn prune_successors(map: &mut HashMap<Box<str>, Successors>, floor: u32) {
+    map.retain(|_, successors| {
+        successors.counts.retain(|_, count| *count > floor);
+        let counts = &successors.counts;
+        successors
+            .cased
+            .retain(|form, _| counts.contains_key(fold(form).as_ref()));
+        successors.total = counts.values().sum();
+        !counts.is_empty()
+    });
+}
+
+/// Moves a file that couldn't be read to an unused name beside it:
+/// `vocabulary.damaged.json`, then `vocabulary.damaged-2.json` and on.
+fn set_aside(path: &Path) -> io::Result<PathBuf> {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    for number in 1.. {
+        let name = match number {
+            1 => format!("{stem}.damaged.json"),
+            number => format!("{stem}.damaged-{number}.json"),
+        };
+        let kept = path.with_file_name(name);
+        if !kept.exists() {
+            std::fs::rename(path, &kept)?;
+            return Ok(kept);
+        }
+    }
+    unreachable!()
+}
+
+/// Writes `data` to `path` whole: to a temporary file beside it first, which
+/// then takes its place.
+fn write_whole(path: &Path, data: &[u8]) -> io::Result<()> {
+    let mut temporary = path.as_os_str().to_owned();
+    temporary.push(format!(".{}.tmp", std::process::id()));
+    let temporary = PathBuf::from(temporary);
+    let written = (|| {
+        let mut file = std::fs::File::create(&temporary)?;
+        file.write_all(data)?;
+        file.sync_all()?;
+        drop(file);
+        replace(&temporary, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    written
+}
+
+/// Renames `from` over `to`. On Windows, as elsewhere, the rename replaces a
+/// file that exists. There another program, such as a virus scanner, can
+/// hold the file open for a moment, so a refusal is tried again a few times.
+fn replace(from: &Path, to: &Path) -> io::Result<()> {
+    let mut tries = 0;
+    loop {
+        match std::fs::rename(from, to) {
+            Err(error)
+                if cfg!(windows)
+                    && tries < 5
+                    && error.kind() == io::ErrorKind::PermissionDenied =>
+            {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            result => return result,
+        }
     }
 }
 
@@ -406,6 +511,9 @@ pub struct SharedVocabulary {
     counts: Counts,
     dictionary: Rc<Dictionary>,
     dirty: bool,
+    /// The file it saves to: none in tests, or when the file there couldn't
+    /// be read and mustn't be written over.
+    file: Option<PathBuf>,
 }
 
 impl SharedVocabulary {
@@ -415,6 +523,7 @@ impl SharedVocabulary {
             counts: Counts::default(),
             dictionary: Rc::new(Dictionary::empty()),
             dirty: false,
+            file: None,
         }
     }
 
@@ -428,21 +537,58 @@ impl SharedVocabulary {
 
     /// Loads the persisted vocabulary, with the spelling dictionary.
     pub fn load() -> Self {
-        let mut vocabulary = Self::with_dictionary(Rc::new(Dictionary::load_default()));
+        let dictionary = Rc::new(Dictionary::load_default());
+        match dirs::config_dir() {
+            Some(config) => Self::load_from(config.join("jot").join("vocabulary.json"), dictionary),
+            None => Self::with_dictionary(dictionary),
+        }
+    }
 
-        let Some(path) = Self::vocab_path() else {
-            return vocabulary;
+    /// Loads the vocabulary saved at `path`, to save there from then on.
+    ///
+    /// A file that doesn't parse, such as one cut short, is never written
+    /// over: it is moved aside to a name beside it, and learning starts
+    /// afresh. One that can't be read or moved is left alone, and nothing is
+    /// saved this session.
+    fn load_from(path: PathBuf, dictionary: Rc<Dictionary>) -> Self {
+        let mut vocabulary = Self::with_dictionary(dictionary);
+        let data = match std::fs::read(&path) {
+            Ok(data) => data,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                vocabulary.file = Some(path);
+                return vocabulary;
+            }
+            Err(error) => {
+                log::error!(
+                    "Couldn't read the word suggestions' vocabulary {}: {error}. It won't be saved \
+                     over this session.",
+                    path.display()
+                );
+                return vocabulary;
+            }
         };
-
-        let Ok(data) = std::fs::read(&path) else {
-            return vocabulary;
-        };
-
-        let Ok(saved) = serde_json::from_slice::<SavedVocabulary>(&data) else {
-            return vocabulary;
-        };
-
-        vocabulary.read(saved);
+        match serde_json::from_slice::<SavedVocabulary>(&data) {
+            Ok(saved) => {
+                vocabulary.read(saved);
+                vocabulary.file = Some(path);
+            }
+            Err(error) => match set_aside(&path) {
+                Ok(kept) => {
+                    log::warn!(
+                        "The word suggestions' vocabulary {} is damaged ({error}). It was kept as {}, \
+                         and a new one started.",
+                        path.display(),
+                        kept.display()
+                    );
+                    vocabulary.file = Some(path);
+                }
+                Err(move_error) => log::error!(
+                    "The word suggestions' vocabulary {} is damaged ({error}), and couldn't be moved \
+                     aside ({move_error}). It won't be saved over this session.",
+                    path.display()
+                ),
+            },
+        }
         vocabulary
     }
 
@@ -463,6 +609,37 @@ impl SharedVocabulary {
         serde_json::to_vec(&Saving(&self.counts))
     }
 
+    /// The vocabulary as `vocabulary.json` holds it, in at most `cap` bytes.
+    /// A larger one first drops its rarest entries, until it fits in seven
+    /// eighths of `cap`, so it has room to grow before it prunes again: the
+    /// trigrams seen once, then the bigrams and then the words, then those
+    /// seen twice, and so on.
+    fn pruned_json(&mut self, cap: u64) -> serde_json::Result<Vec<u8>> {
+        let mut data = self.to_json()?;
+        if data.len() as u64 <= cap {
+            return Ok(data);
+        }
+        let before = data.len();
+        let target = cap / 8 * 7;
+        let mut floor = 1;
+        'pruning: loop {
+            for level in [Level::Trigrams, Level::Bigrams, Level::Words] {
+                self.counts.prune(level, floor);
+                data = self.to_json()?;
+                if data.len() as u64 <= target {
+                    break 'pruning;
+                }
+            }
+            floor += 1;
+        }
+        log::info!(
+            "The word suggestions' vocabulary reached {before} bytes. It dropped the entries seen \
+             {floor} times or fewer and is now {} bytes.",
+            data.len()
+        );
+        Ok(data)
+    }
+
     /// Returns the spelling dictionary shared with autocomplete hygiene.
     pub fn dictionary(&self) -> Rc<Dictionary> {
         self.dictionary.clone()
@@ -470,28 +647,36 @@ impl SharedVocabulary {
 
     /// Persists the vocabulary if it has changed since the last save.
     pub fn save(&mut self) {
+        self.save_within(VOCAB_MAX_BYTES);
+    }
+
+    /// Saves in at most `cap` bytes, pruning to fit. The file is written in
+    /// full beside the old one and then takes its place, so a crash leaves
+    /// one or the other whole.
+    fn save_within(&mut self, cap: u64) {
         if !self.dirty {
             return;
         }
-
-        let Some(path) = Self::vocab_path() else {
+        let Some(path) = self.file.clone() else {
             return;
         };
-
+        let data = match self.pruned_json(cap) {
+            Ok(data) => data,
+            Err(error) => {
+                log::error!("Couldn't save the word suggestions' vocabulary: {error}");
+                return;
+            }
+        };
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-
-        if let Ok(data) = self.to_json()
-            && data.len() as u64 <= VOCAB_MAX_BYTES
-            && std::fs::write(&path, &data).is_ok()
-        {
-            self.dirty = false;
+        match write_whole(&path, &data) {
+            Ok(()) => self.dirty = false,
+            Err(error) => log::error!(
+                "Couldn't save the word suggestions' vocabulary {}: {error}",
+                path.display()
+            ),
         }
-    }
-
-    fn vocab_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|path| path.join("jot").join("vocabulary.json"))
     }
 
     pub(super) fn counts(&self) -> &Counts {
@@ -776,6 +961,126 @@ mod tests {
         assert_eq!(saved["version"], 2);
         assert_eq!(saved["words"]["Thanks"], 40);
         assert_eq!(saved["bigrams"], serde_json::json!({}));
+    }
+
+    /// A folder for one test's files, removed afterwards.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let folder =
+                std::env::temp_dir().join(format!("jot-vocabulary-{}-{name}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&folder);
+            std::fs::create_dir_all(&folder).unwrap();
+            Self(folder)
+        }
+
+        fn file(&self) -> PathBuf {
+            self.0.join("vocabulary.json")
+        }
+
+        fn names(&self) -> Vec<String> {
+            let mut names: Vec<String> = std::fs::read_dir(&self.0)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        }
+
+        fn load(&self) -> SharedVocabulary {
+            SharedVocabulary::load_from(self.file(), Rc::new(Dictionary::empty()))
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn saving_replaces_the_file_whole() {
+        let scratch = Scratch::new("save");
+        let mut vocabulary = scratch.load();
+        vocabulary.learn_sentence("Ferns grow slowly");
+        vocabulary.save();
+        vocabulary.learn_sentence("Mosses grow faster");
+        vocabulary.save();
+        assert_eq!(scratch.names(), ["vocabulary.json"]);
+        let reloaded = scratch.load();
+        assert_eq!(reloaded.counts.word_count("grow"), 2);
+        assert!(!reloaded.dirty);
+    }
+
+    /// A damaged file, such as one a crash cut short, isn't written over: it
+    /// is kept beside the new one.
+    #[test]
+    fn a_damaged_file_is_kept() {
+        let scratch = Scratch::new("damaged");
+        let damaged = br#"{"version":2,"words":{"Ferns":3,"gr"#;
+        std::fs::write(scratch.file(), damaged).unwrap();
+        let mut vocabulary = scratch.load();
+        assert_eq!(vocabulary.counts.total(), 0);
+        vocabulary.learn_sentence("Mosses grow faster");
+        vocabulary.save();
+        assert_eq!(
+            scratch.names(),
+            ["vocabulary.damaged.json", "vocabulary.json"]
+        );
+        assert_eq!(
+            std::fs::read(scratch.0.join("vocabulary.damaged.json")).unwrap(),
+            damaged
+        );
+        assert_eq!(scratch.load().counts.word_count("mosses"), 1);
+
+        std::fs::write(scratch.file(), "not a vocabulary").unwrap();
+        scratch.load();
+        assert_eq!(
+            scratch.names(),
+            ["vocabulary.damaged-2.json", "vocabulary.damaged.json"]
+        );
+    }
+
+    /// One that can't be read at all is left alone, and not saved over.
+    #[test]
+    fn an_unreadable_file_is_left_alone() {
+        let scratch = Scratch::new("unreadable");
+        std::fs::create_dir(scratch.file()).unwrap();
+        let mut vocabulary = scratch.load();
+        vocabulary.learn_sentence("Mosses grow faster");
+        vocabulary.save();
+        assert!(scratch.file().is_dir());
+        assert_eq!(scratch.names(), ["vocabulary.json"]);
+    }
+
+    /// Past its cap, a vocabulary drops its rarest entries, trigrams first,
+    /// and goes on learning.
+    #[test]
+    fn a_vocabulary_past_its_cap_drops_its_rarest_entries() {
+        let scratch = Scratch::new("cap");
+        let mut vocabulary = scratch.load();
+        for _ in 0..5 {
+            vocabulary.learn_sentence("Thanks for the update");
+        }
+        for number in 0..200 {
+            vocabulary.learn_sentence(&format!("Notes on topic{number} today"));
+        }
+        let cap = vocabulary.to_json().unwrap().len() as u64 / 2;
+        vocabulary.save_within(cap);
+        let saved = std::fs::metadata(scratch.file()).unwrap().len();
+        assert!(saved <= cap / 8 * 7, "{saved} bytes, cap {cap}");
+
+        let reloaded = scratch.load();
+        assert_eq!(trigram(&reloaded, "thanks", "for", "the"), 5);
+        assert_eq!(bigram(&reloaded, "notes", "on"), 200);
+        assert_eq!(trigram(&reloaded, "notes", "on", "topic7"), 0);
+        assert_eq!(bigram(&reloaded, "on", "topic7"), 0);
+        assert_eq!(reloaded.counts.word_count("topic7"), 1);
+
+        vocabulary.learn_sentence("Mosses grow faster");
+        vocabulary.save_within(cap);
+        assert_eq!(scratch.load().counts.word_count("mosses"), 1);
     }
 
     /// A word predicted after another shows the form it took after that one.

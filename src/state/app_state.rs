@@ -8,11 +8,17 @@ use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::{Keymap, Position};
 use gpui_kit::{
     App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    ParentElement, SharedString, Subscription, Window,
+    ParentElement, SharedString, Subscription, Task, Window,
 };
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::Duration;
+
+/// How often the word suggestions' vocabulary is saved while something new
+/// has been learned, besides when a file is saved, a tab or the window
+/// closes, and jot quits.
+const VOCABULARY_SAVE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 // Subscribers read only some of the indices.
 #[allow(dead_code)]
@@ -39,6 +45,7 @@ pub struct AppState {
     pub current_view: View,
     pub is_closing_window: bool,
     _subscriptions: Vec<Subscription>,
+    _vocabulary_saves: Task<()>,
 }
 
 impl EventEmitter<AppEvent> for AppState {}
@@ -56,6 +63,24 @@ impl AppState {
         let suggestion_pacing = Rc::new(SuggestionPacing::new(settings.autocomplete));
         let shared_vocabulary = Rc::new(RefCell::new(SharedVocabulary::load()));
 
+        // Learning is saved on the way out, at logoff or shutdown too, and
+        // every few minutes in case jot doesn't get to quit.
+        let save_on_quit = cx.on_app_quit(|this: &mut Self, _| {
+            this.shared_vocabulary.borrow_mut().save();
+            async {}
+        });
+        let vocabulary_saves = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(VOCABULARY_SAVE_INTERVAL)
+                    .await;
+                let saved = this.update(cx, |this, _| this.shared_vocabulary.borrow_mut().save());
+                if saved.is_err() {
+                    break;
+                }
+            }
+        });
+
         Self {
             documents: Vec::new(),
             active_index: 0,
@@ -66,7 +91,8 @@ impl AppState {
             focus_handle,
             current_view: View::Editor,
             is_closing_window: false,
-            _subscriptions: Vec::new(),
+            _subscriptions: vec![save_on_quit],
+            _vocabulary_saves: vocabulary_saves,
         }
     }
 
