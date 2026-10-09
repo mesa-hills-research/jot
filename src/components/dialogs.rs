@@ -68,11 +68,7 @@ pub fn attempt_close_window(
     }
 }
 
-pub fn prompt_next_dirty_tab(
-    app_state: Entity<AppState>,
-    window: &mut Window,
-    cx: &mut App,
-) {
+pub fn prompt_next_dirty_tab(app_state: Entity<AppState>, window: &mut Window, cx: &mut App) {
     let dirty_index = app_state.update(cx, |state, cx| {
         state.refresh_all_dirty_states(cx);
         state.documents.iter().position(|d| d.read(cx).dirty)
@@ -129,17 +125,14 @@ fn show_save_dialog_for_tab(
                 let app_state_save_click = app_state.clone();
 
                 DialogFooter::new()
-                    .child(
-                        Button::new("cancel")
-                            .outline()
-                            .label("Cancel")
-                            .on_click(move |_, window, cx| {
-                                app_state_cancel_click.update(cx, |state, _| {
-                                    state.is_closing_window = false;
-                                });
-                                window.close_dialog(cx);
-                            }),
-                    )
+                    .child(Button::new("cancel").outline().label("Cancel").on_click(
+                        move |_, window, cx| {
+                            app_state_cancel_click.update(cx, |state, _| {
+                                state.is_closing_window = false;
+                            });
+                            window.close_dialog(cx);
+                        },
+                    ))
                     .child(
                         Button::new("dont-save")
                             .outline()
@@ -149,8 +142,7 @@ fn show_save_dialog_for_tab(
                                 app_state_discard_click.update(cx, |state, cx| {
                                     state.force_close_tab(index, window, cx);
                                 });
-                                let is_closing =
-                                    app_state_discard_click.read(cx).is_closing_window;
+                                let is_closing = app_state_discard_click.read(cx).is_closing_window;
                                 if is_closing {
                                     prompt_next_dirty_tab(
                                         app_state_discard_click.clone(),
@@ -160,20 +152,17 @@ fn show_save_dialog_for_tab(
                                 }
                             }),
                     )
-                    .child(
-                        Button::new("save")
-                            .primary()
-                            .label("Save")
-                            .on_click(move |_, window, cx| {
-                                window.close_dialog(cx);
-                                perform_save_and_close_tab(
-                                    window,
-                                    app_state_save_click.clone(),
-                                    index,
-                                    cx,
-                                );
-                            }),
-                    )
+                    .child(Button::new("save").primary().label("Save").on_click(
+                        move |_, window, cx| {
+                            window.close_dialog(cx);
+                            perform_save_and_close_tab(
+                                window,
+                                app_state_save_click.clone(),
+                                index,
+                                cx,
+                            );
+                        },
+                    ))
             })
     });
 }
@@ -186,92 +175,92 @@ fn perform_save_and_close_tab(
 ) {
     window
         .spawn(cx, async move |cx| {
-            {
-                let doc_info = cx
-                    .update(|_, cx| {
-                        app_state.update(cx, |state, cx| {
-                            state.documents.get(index).cloned().map(|doc| {
-                                let content = doc.read(cx).content(cx);
-                                let path = doc.read(cx).path.clone();
-                                (doc, path, content)
-                            })
+            let doc_info = cx
+                .update(|_, cx| {
+                    app_state.update(cx, |state, cx| {
+                        state.documents.get(index).cloned().map(|doc| {
+                            let content = doc.read(cx).content(cx);
+                            let path = doc.read(cx).path.clone();
+                            (doc, path, content)
                         })
                     })
-                    .ok()
-                    .flatten();
+                })
+                .ok()
+                .flatten();
 
-                let Some((doc, path, content)) = doc_info else {
-                    cx.update(|_window, cx| {
-                        app_state.update(cx, |state, _cx| {
-                            state.is_closing_window = false;
-                        });
-                    }).ok();
-                    return;
-                };
+            let Some((doc, path, content)) = doc_info else {
+                cx.update(|_window, cx| {
+                    app_state.update(cx, |state, _cx| {
+                        state.is_closing_window = false;
+                    });
+                })
+                .ok();
+                return;
+            };
 
-                let saved_path = if let Some(existing_path) = path {
-                    cx.update(|_, cx| {
-                        app_state.update(cx, |state, cx| {
-                            if let Err(e) = state.perform_save(
-                                doc.clone(),
-                                existing_path.clone(),
-                                content.clone(),
-                                cx,
-                            ) {
-                                log::error!("Failed to save: {}", e);
-                                None
-                            } else {
-                                Some(existing_path)
-                            }
-                        })
-                    })
-                    .ok()
-                    .flatten()
-                } else {
-                    let file = rfd::AsyncFileDialog::new()
-                        .add_filter("Text Files", &["txt"])
-                        .add_filter("All Files", &["*"])
-                        .set_file_name("untitled.txt")
-                        .save_file()
-                        .await;
-
-                    if let Some(file) = file {
-                        let path = file.path().to_path_buf();
-                        if let Err(e) = std::fs::write(&path, &content) {
-                            log::error!("Failed to save file: {}", e);
+            let saved_path = if let Some(existing_path) = path {
+                cx.update(|_, cx| {
+                    app_state.update(cx, |state, cx| {
+                        if let Err(e) = state.perform_save(
+                            doc.clone(),
+                            existing_path.clone(),
+                            content.clone(),
+                            cx,
+                        ) {
+                            log::error!("Failed to save: {}", e);
                             None
                         } else {
-                            cx.update(|_, cx| {
-                                app_state.update(cx, |state, cx| {
-                                    state.document_saved(doc.clone(), path.clone(), cx);
-                                });
-                            })
-                            .ok();
-                            Some(path)
-                        }
-                    } else {
-                        None
-                    }
-                };
-
-                if saved_path.is_some() {
-                    cx.update(|window, cx| {
-                        app_state.update(cx, |state, cx| {
-                            state.force_close_tab(index, window, cx);
-                        });
-                        let is_closing = app_state.read(cx).is_closing_window;
-                        if is_closing {
-                            prompt_next_dirty_tab(app_state.clone(), window, cx);
+                            Some(existing_path)
                         }
                     })
-                    .ok();
+                })
+                .ok()
+                .flatten()
+            } else {
+                let file = rfd::AsyncFileDialog::new()
+                    .add_filter("Text Files", &["txt"])
+                    .add_filter("All Files", &["*"])
+                    .set_file_name("untitled.txt")
+                    .save_file()
+                    .await;
+
+                if let Some(file) = file {
+                    let path = file.path().to_path_buf();
+                    if let Err(e) = std::fs::write(&path, &content) {
+                        log::error!("Failed to save file: {}", e);
+                        None
+                    } else {
+                        cx.update(|_, cx| {
+                            app_state.update(cx, |state, cx| {
+                                state.document_saved(doc.clone(), path.clone(), cx);
+                            });
+                        })
+                        .ok();
+                        Some(path)
+                    }
                 } else {
-                    cx.update(|_window, cx| {
-                        app_state.update(cx, |state, _cx| {
-                            state.is_closing_window = false;
-                        });
-                    }).ok();
+                    None
                 }
+            };
+
+            if saved_path.is_some() {
+                cx.update(|window, cx| {
+                    app_state.update(cx, |state, cx| {
+                        state.force_close_tab(index, window, cx);
+                    });
+                    let is_closing = app_state.read(cx).is_closing_window;
+                    if is_closing {
+                        prompt_next_dirty_tab(app_state.clone(), window, cx);
+                    }
+                })
+                .ok();
+            } else {
+                cx.update(|_window, cx| {
+                    app_state.update(cx, |state, _cx| {
+                        state.is_closing_window = false;
+                    });
+                })
+                .ok();
             }
         })
         .detach();

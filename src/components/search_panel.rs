@@ -1,12 +1,14 @@
 use crate::state::AppState;
-use gpui_kit::{
-    div, px, AppContext, Entity, FocusHandle, Focusable, IntoElement, ParentElement, 
-    prelude::FluentBuilder, Render, Styled, Subscription, Window,
-};
 use gpui_kit::component::{
+    ActiveTheme, IconName, Sizable,
     button::{Button, ButtonVariants},
+    h_flex,
     input::{Input, InputEvent, InputState, Position},
-    ActiveTheme, IconName, Sizable, h_flex, v_flex,
+    v_flex,
+};
+use gpui_kit::{
+    AppContext, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled,
+    Subscription, Window, div, prelude::FluentBuilder, px,
 };
 
 pub struct SearchPanel {
@@ -21,7 +23,11 @@ pub struct SearchPanel {
 }
 
 impl SearchPanel {
-    pub fn new(app_state: Entity<AppState>, window: &mut Window, cx: &mut gpui_kit::Context<Self>) -> Self {
+    pub fn new(
+        app_state: Entity<AppState>,
+        window: &mut Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> Self {
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("Find..."));
         let replace_input = cx.new(|cx| InputState::new(window, cx).placeholder("Replace with..."));
         let focus_handle = cx.focus_handle();
@@ -62,7 +68,11 @@ impl SearchPanel {
             let content = doc.read(cx).content(cx);
             self.match_positions = content.match_indices(&query).map(|(pos, _)| pos).collect();
             self.match_count = self.match_positions.len();
-            self.current_match = if self.match_positions.is_empty() { 0 } else { 1 };
+            self.current_match = if self.match_positions.is_empty() {
+                0
+            } else {
+                1
+            };
             cx.notify();
         }
     }
@@ -81,8 +91,9 @@ impl SearchPanel {
         if let Some(doc) = state.active_document() {
             let editor_state = doc.read(cx).editor_state.clone();
             let current_cursor = editor_state.read(cx).cursor();
-            
-            let next_pos = self.match_positions
+
+            let next_pos = self
+                .match_positions
                 .iter()
                 .find(|&&pos| pos > current_cursor)
                 .or_else(|| self.match_positions.first());
@@ -91,13 +102,21 @@ impl SearchPanel {
                 let line_info = self.offset_to_line_col(&self.app_state, pos, cx);
                 editor_state.update(cx, |state, cx| {
                     state.set_cursor_position(
-                        Position { line: line_info.0 as u32, character: line_info.1 as u32 },
+                        Position {
+                            line: line_info.0 as u32,
+                            character: line_info.1 as u32,
+                        },
                         window,
                         cx,
                     );
                 });
-                
-                self.current_match = self.match_positions.iter().position(|&p| p == pos).unwrap_or(0) + 1;
+
+                self.current_match = self
+                    .match_positions
+                    .iter()
+                    .position(|&p| p == pos)
+                    .unwrap_or(0)
+                    + 1;
                 cx.notify();
             }
         }
@@ -117,8 +136,9 @@ impl SearchPanel {
         if let Some(doc) = state.active_document() {
             let editor_state = doc.read(cx).editor_state.clone();
             let current_cursor = editor_state.read(cx).cursor();
-            
-            let prev_pos = self.match_positions
+
+            let prev_pos = self
+                .match_positions
                 .iter()
                 .rev()
                 .find(|&&pos| pos < current_cursor)
@@ -128,26 +148,39 @@ impl SearchPanel {
                 let line_info = self.offset_to_line_col(&self.app_state, pos, cx);
                 editor_state.update(cx, |state, cx| {
                     state.set_cursor_position(
-                        Position { line: line_info.0 as u32, character: line_info.1 as u32 },
+                        Position {
+                            line: line_info.0 as u32,
+                            character: line_info.1 as u32,
+                        },
                         window,
                         cx,
                     );
                 });
-                
-                self.current_match = self.match_positions.iter().position(|&p| p == pos).unwrap_or(0) + 1;
+
+                self.current_match = self
+                    .match_positions
+                    .iter()
+                    .position(|&p| p == pos)
+                    .unwrap_or(0)
+                    + 1;
                 cx.notify();
             }
         }
     }
 
-    fn offset_to_line_col(&self, app_state: &Entity<AppState>, offset: usize, cx: &gpui_kit::App) -> (usize, usize) {
+    fn offset_to_line_col(
+        &self,
+        app_state: &Entity<AppState>,
+        offset: usize,
+        cx: &gpui_kit::App,
+    ) -> (usize, usize) {
         let state = app_state.read(cx);
         if let Some(doc) = state.active_document() {
             let content = doc.read(cx).content(cx);
             let mut line = 0;
             let mut col = 0;
             let mut current_offset = 0;
-            
+
             for ch in content.chars() {
                 if current_offset >= offset {
                     break;
@@ -168,7 +201,7 @@ impl SearchPanel {
     fn replace_current(&mut self, window: &mut Window, cx: &mut gpui_kit::Context<Self>) {
         let query = self.search_input.read(cx).value().to_string();
         let replacement = self.replace_input.read(cx).value().to_string();
-        
+
         if query.is_empty() {
             return;
         }
@@ -178,18 +211,20 @@ impl SearchPanel {
             let editor_state = doc.read(cx).editor_state.clone();
             let content = doc.read(cx).content(cx);
             let current_cursor = editor_state.read(cx).cursor();
-            
-            if let Some(&match_pos) = self.match_positions.iter().find(|&&pos| {
-                pos <= current_cursor && current_cursor <= pos + query.len()
-            }) {
+
+            if let Some(&match_pos) = self
+                .match_positions
+                .iter()
+                .find(|&&pos| pos <= current_cursor && current_cursor <= pos + query.len())
+            {
                 let before = &content[..match_pos];
                 let after = &content[match_pos + query.len()..];
                 let new_content = format!("{}{}{}", before, replacement, after);
-                
+
                 editor_state.update(cx, |state, cx| {
                     state.set_value(&new_content, window, cx);
                 });
-                
+
                 self.perform_search(&self.app_state.clone(), cx);
                 self.find_next(window, cx);
             }
@@ -199,7 +234,7 @@ impl SearchPanel {
     fn replace_all(&mut self, window: &mut Window, cx: &mut gpui_kit::Context<Self>) {
         let query = self.search_input.read(cx).value().to_string();
         let replacement = self.replace_input.read(cx).value().to_string();
-        
+
         if query.is_empty() {
             return;
         }
@@ -209,11 +244,11 @@ impl SearchPanel {
             let editor_state = doc.read(cx).editor_state.clone();
             let content = doc.read(cx).content(cx);
             let new_content = content.replace(&query, &replacement);
-            
+
             editor_state.update(cx, |state, cx| {
                 state.set_value(&new_content, window, cx);
             });
-            
+
             self.match_count = 0;
             self.current_match = 0;
             self.match_positions.clear();
@@ -234,7 +269,11 @@ impl Focusable for SearchPanel {
 }
 
 impl Render for SearchPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut gpui_kit::Context<Self>) -> impl IntoElement {
+    fn render(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> impl IntoElement {
         let state = self.app_state.read(cx);
 
         if !state.search_visible {
@@ -265,11 +304,7 @@ impl Render for SearchPanel {
                         div()
                             .w(px(240.))
                             .h_full()
-                            .child(
-                                Input::new(&self.search_input)
-                                    .small()
-                                    .w_full(),
-                            ),
+                            .child(Input::new(&self.search_input).small().w_full()),
                     )
                     .child(
                         Button::new("prev")
@@ -329,11 +364,7 @@ impl Render for SearchPanel {
                             div()
                                 .w(px(240.))
                                 .h_full()
-                                .child(
-                                    Input::new(&self.replace_input)
-                                        .small()
-                                        .w_full(),
-                                ),
+                                .child(Input::new(&self.replace_input).small().w_full()),
                         )
                         .child(
                             Button::new("replace")

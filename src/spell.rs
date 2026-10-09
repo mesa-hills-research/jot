@@ -537,7 +537,14 @@ fn check_line(
         while ix < chars.len() && is_token_char(chars[ix].1) {
             ix += 1;
         }
-        examine_token(dictionary, &chars, raw_start, ix, suggestion_budget, &mut result);
+        examine_token(
+            dictionary,
+            &chars,
+            raw_start,
+            ix,
+            suggestion_budget,
+            &mut result,
+        );
     }
     result
 }
@@ -656,7 +663,10 @@ fn starts_sentence(chars: &[(usize, char)], raw_start: usize) -> bool {
     while ix > 0 {
         let c = chars[ix - 1].1;
         if c.is_whitespace()
-            || matches!(c, '"' | '\'' | '(' | '[' | '{' | '\u{2018}' | '\u{201C}' | '*')
+            || matches!(
+                c,
+                '"' | '\'' | '(' | '[' | '{' | '\u{2018}' | '\u{201C}' | '*'
+            )
         {
             ix -= 1;
             continue;
@@ -704,8 +714,7 @@ fn bounded_osa_distance(a: &[char], b: &[char], max: usize) -> Option<usize> {
 fn match_case(source: &str, suggestion: &str) -> String {
     match source.chars().next() {
         Some(f) if f.is_uppercase() => {
-            let all_caps =
-                source.chars().all(|c| !c.is_lowercase()) && source.chars().count() > 1;
+            let all_caps = source.chars().all(|c| !c.is_lowercase()) && source.chars().count() > 1;
             if all_caps {
                 suggestion.to_uppercase()
             } else {

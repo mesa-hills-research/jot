@@ -70,12 +70,7 @@ impl JotApp {
         }
     }
 
-    fn handle_app_event(
-        &mut self,
-        event: &AppEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn handle_app_event(&mut self, event: &AppEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             AppEvent::SettingsChanged => {
                 self.app_state.update(cx, |state, cx| {
@@ -107,9 +102,7 @@ impl JotApp {
                             DialogClose::new()
                                 .child(Button::new("cancel").outline().label("Cancel")),
                         )
-                        .child(
-                            DialogAction::new().child(Button::new("ok").primary().label("OK")),
-                        ),
+                        .child(DialogAction::new().child(Button::new("ok").primary().label("OK"))),
                 )
                 .on_ok(move |_, window, cx| {
                     let line_str = input_go.read(cx).value().to_string();
@@ -126,41 +119,39 @@ impl JotApp {
     fn trigger_open_file(window: &Window, app_state: Entity<AppState>, cx: &App) {
         window
             .spawn(cx, async move |cx| {
-                {
-                    let file = rfd::AsyncFileDialog::new()
-                        .add_filter(
-                            "Text Files",
-                            &["txt", "md", "json", "xml", "html", "css", "js"],
-                        )
-                        .add_filter("All Files", &["*"])
-                        .pick_file()
-                        .await;
+                let file = rfd::AsyncFileDialog::new()
+                    .add_filter(
+                        "Text Files",
+                        &["txt", "md", "json", "xml", "html", "css", "js"],
+                    )
+                    .add_filter("All Files", &["*"])
+                    .pick_file()
+                    .await;
 
-                    if let Some(file) = file {
-                        let path = file.path().to_path_buf();
+                if let Some(file) = file {
+                    let path = file.path().to_path_buf();
 
-                        cx.update(|window, cx| {
-                            app_state.update(cx, |state, cx| {
-                                state.open_file(path, window, cx);
-                            });
-                        })
-                        .ok();
+                    cx.update(|window, cx| {
+                        app_state.update(cx, |state, cx| {
+                            state.open_file(path, window, cx);
+                        });
+                    })
+                    .ok();
 
-                        let app_state_clone = app_state.clone();
-                        cx.on_next_frame(move |_window, _cx| {
-                            let app_state_inner = app_state_clone.clone();
-                            _window.on_next_frame(move |_window, cx| {
-                                app_state_inner.update(cx, |state, cx| {
-                                    if let Some(doc) = state.active_document() {
-                                        let editor_state = doc.read(cx).editor_state.clone();
-                                        editor_state.update(cx, |_, cx| {
-                                            cx.notify();
-                                        });
-                                    }
-                                });
+                    let app_state_clone = app_state.clone();
+                    cx.on_next_frame(move |_window, _cx| {
+                        let app_state_inner = app_state_clone.clone();
+                        _window.on_next_frame(move |_window, cx| {
+                            app_state_inner.update(cx, |state, cx| {
+                                if let Some(doc) = state.active_document() {
+                                    let editor_state = doc.read(cx).editor_state.clone();
+                                    editor_state.update(cx, |_, cx| {
+                                        cx.notify();
+                                    });
+                                }
                             });
                         });
-                    }
+                    });
                 }
             })
             .detach();
@@ -169,42 +160,40 @@ impl JotApp {
     fn trigger_new_from_template(window: &Window, app_state: Entity<AppState>, cx: &App) {
         window
             .spawn(cx, async move |cx| {
-                {
-                    let file = rfd::AsyncFileDialog::new()
-                        .set_title("Select Template")
-                        .add_filter(
-                            "Text Files",
-                            &["txt", "md", "json", "xml", "html", "css", "js"],
-                        )
-                        .add_filter("All Files", &["*"])
-                        .pick_file()
-                        .await;
+                let file = rfd::AsyncFileDialog::new()
+                    .set_title("Select Template")
+                    .add_filter(
+                        "Text Files",
+                        &["txt", "md", "json", "xml", "html", "css", "js"],
+                    )
+                    .add_filter("All Files", &["*"])
+                    .pick_file()
+                    .await;
 
-                    if let Some(file) = file {
-                        let path = file.path().to_path_buf();
+                if let Some(file) = file {
+                    let path = file.path().to_path_buf();
 
-                        cx.update(|window, cx| {
-                            app_state.update(cx, |state, cx| {
-                                state.open_as_template(path, window, cx);
-                            });
-                        })
-                        .ok();
+                    cx.update(|window, cx| {
+                        app_state.update(cx, |state, cx| {
+                            state.open_as_template(path, window, cx);
+                        });
+                    })
+                    .ok();
 
-                        let app_state_clone = app_state.clone();
-                        cx.on_next_frame(move |_window, _cx| {
-                            let app_state_inner = app_state_clone.clone();
-                            _window.on_next_frame(move |_window, cx| {
-                                app_state_inner.update(cx, |state, cx| {
-                                    if let Some(doc) = state.active_document() {
-                                        let editor_state = doc.read(cx).editor_state.clone();
-                                        editor_state.update(cx, |_, cx| {
-                                            cx.notify();
-                                        });
-                                    }
-                                });
+                    let app_state_clone = app_state.clone();
+                    cx.on_next_frame(move |_window, _cx| {
+                        let app_state_inner = app_state_clone.clone();
+                        _window.on_next_frame(move |_window, cx| {
+                            app_state_inner.update(cx, |state, cx| {
+                                if let Some(doc) = state.active_document() {
+                                    let editor_state = doc.read(cx).editor_state.clone();
+                                    editor_state.update(cx, |_, cx| {
+                                        cx.notify();
+                                    });
+                                }
                             });
                         });
-                    }
+                    });
                 }
             })
             .detach();
@@ -213,43 +202,41 @@ impl JotApp {
     fn trigger_save_as(window: &Window, app_state: Entity<AppState>, cx: &App) {
         window
             .spawn(cx, async move |cx| {
-                {
-                    let (doc, content) = cx
-                        .update(|_, cx| {
-                            app_state.update(cx, |state, cx| {
-                                if let Some(doc) = state.active_document().cloned() {
-                                    let content = doc.read(cx).content(cx);
-                                    (Some(doc), content)
-                                } else {
-                                    (None, String::new())
-                                }
-                            })
+                let (doc, content) = cx
+                    .update(|_, cx| {
+                        app_state.update(cx, |state, cx| {
+                            if let Some(doc) = state.active_document().cloned() {
+                                let content = doc.read(cx).content(cx);
+                                (Some(doc), content)
+                            } else {
+                                (None, String::new())
+                            }
                         })
-                        .unwrap_or((None, String::new()));
+                    })
+                    .unwrap_or((None, String::new()));
 
-                    let Some(doc) = doc else { return };
+                let Some(doc) = doc else { return };
 
-                    let file = rfd::AsyncFileDialog::new()
-                        .add_filter("Text Files", &["txt"])
-                        .add_filter("All Files", &["*"])
-                        .set_file_name("untitled.txt")
-                        .save_file()
-                        .await;
+                let file = rfd::AsyncFileDialog::new()
+                    .add_filter("Text Files", &["txt"])
+                    .add_filter("All Files", &["*"])
+                    .set_file_name("untitled.txt")
+                    .save_file()
+                    .await;
 
-                    if let Some(file) = file {
-                        let path = file.path().to_path_buf();
-                        if let Err(e) = std::fs::write(&path, &content) {
-                            log::error!("Failed to save file: {}", e);
-                            return;
-                        }
-
-                        cx.update(|_, cx| {
-                            app_state.update(cx, |state, cx| {
-                                state.document_saved(doc, path, cx);
-                            });
-                        })
-                        .ok();
+                if let Some(file) = file {
+                    let path = file.path().to_path_buf();
+                    if let Err(e) = std::fs::write(&path, &content) {
+                        log::error!("Failed to save file: {}", e);
+                        return;
                     }
+
+                    cx.update(|_, cx| {
+                        app_state.update(cx, |state, cx| {
+                            state.document_saved(doc, path, cx);
+                        });
+                    })
+                    .ok();
                 }
             })
             .detach();
@@ -271,15 +258,14 @@ impl JotApp {
             .on_action(cx.listener(|this, _: &Save, window, cx| {
                 let app_state = this.app_state.clone();
 
-                let needs_save_as = app_state.update(cx, |state, cx| {
-                    match state.save_active_document(cx) {
+                let needs_save_as =
+                    app_state.update(cx, |state, cx| match state.save_active_document(cx) {
                         Ok(saved) => !saved,
                         Err(e) => {
                             log::error!("Save failed: {}", e);
                             false
                         }
-                    }
-                });
+                    });
 
                 if needs_save_as {
                     Self::trigger_save_as(window, app_state, cx);

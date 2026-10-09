@@ -6,8 +6,8 @@ use gpui_kit::component::{
 use gpui_kit::{Entity, IntoElement, Render, Styled, Subscription, Window, div, prelude::*, px};
 
 const VOID_ELEMENTS: &[&str] = &[
-    "area", "base", "br", "col", "embed", "hr", "img", "input",
-    "link", "meta", "param", "source", "track", "wbr",
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
 ];
 
 pub struct Editor {
@@ -18,11 +18,7 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new(
-        app_state: Entity<AppState>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(app_state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut editor = Self {
             app_state: app_state.clone(),
             active_doc_subscription: None,
@@ -41,22 +37,20 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let sub = cx.subscribe_in(&app_state, window, |this, _, event, window, cx| {
-            match event {
+        let sub = cx.subscribe_in(
+            &app_state,
+            window,
+            |this, _, event, window, cx| match event {
                 AppEvent::ActiveTabChanged(_) | AppEvent::TabAdded(_) => {
                     this.update_active_document_subscription(window, cx);
                 }
                 _ => {}
-            }
-        });
+            },
+        );
         self._app_subscriptions.push(sub);
     }
 
-    fn update_active_document_subscription(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn update_active_document_subscription(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.active_doc_subscription = None;
 
         let state = self.app_state.read(cx);
@@ -167,9 +161,7 @@ impl Editor {
             return false;
         }
 
-        chars.all(|c| {
-            c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':'
-        })
+        chars.all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':')
     }
 
     fn detect_xml_tag_to_close(content: &str, cursor: usize) -> Option<String> {

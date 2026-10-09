@@ -1,14 +1,14 @@
 use crate::actions::*;
 use crate::state::AppState;
-use gpui_kit::{
-    anchored, deferred, div, px, App, AppContext, ClickEvent, Context, DismissEvent, Entity, Focusable,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, prelude::FluentBuilder, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
-};
 use gpui_kit::component::{
+    Selectable, Sizable,
     button::{Button, ButtonVariants},
     menu::PopupMenu,
-    Sizable, Selectable,
+};
+use gpui_kit::{
+    App, AppContext, ClickEvent, Context, DismissEvent, Entity, Focusable, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Render, SharedString, StatefulInteractiveElement,
+    Styled, Subscription, Window, anchored, deferred, div, prelude::FluentBuilder, px,
 };
 
 pub struct MenuBar {
@@ -243,14 +243,12 @@ impl MenuBar {
             }))
             .when(is_active, |this| {
                 let menu = self.get_or_build_menu(index, window, cx);
-                this.child(
-                    deferred(
-                        anchored()
-                            .anchor(gpui_kit::Anchor::TopLeft)
-                            .snap_to_window_with_margin(px(8.))
-                            .child(div().occlude().top_1().child(menu)),
-                    ),
-                )
+                this.child(deferred(
+                    anchored()
+                        .anchor(gpui_kit::Anchor::TopLeft)
+                        .snap_to_window_with_margin(px(8.))
+                        .child(div().occlude().top_1().child(menu)),
+                ))
             })
     }
 }

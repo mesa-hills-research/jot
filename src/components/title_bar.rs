@@ -2,10 +2,8 @@
 
 use crate::components::MenuBar;
 use crate::state::AppState;
-use gpui_kit::{
-    div, px, Entity, IntoElement, ParentElement, Render, Styled, Window,
-};
-use gpui_kit::component::{ActiveTheme, TitleBar, h_flex, Icon, Sizable};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable, TitleBar, h_flex};
+use gpui_kit::{Entity, IntoElement, ParentElement, Render, Styled, Window, div, px};
 
 pub struct JotTitleBar {
     app_state: Entity<AppState>,
@@ -14,17 +12,21 @@ pub struct JotTitleBar {
 
 impl JotTitleBar {
     pub fn new(app_state: Entity<AppState>, menu_bar: Entity<MenuBar>) -> Self {
-        Self { 
-            app_state, 
-            menu_bar 
+        Self {
+            app_state,
+            menu_bar,
         }
     }
 }
 
 impl Render for JotTitleBar {
-    fn render(&mut self, _window: &mut Window, cx: &mut gpui_kit::Context<Self>) -> impl IntoElement {
+    fn render(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> impl IntoElement {
         let state = self.app_state.read(cx);
-        
+
         let (title_text, is_dirty) = if let Some(doc) = state.active_document() {
             let doc = doc.read(cx);
             (doc.title.clone(), doc.dirty)
@@ -49,18 +51,23 @@ impl Render for JotTitleBar {
                     h_flex()
                         .gap_2()
                         .items_center()
-                        .child(Icon::new(Icon::empty()).path("icons/logo/jot-logo-grand-hotel.svg").with_size(px(5.5)).text_color(cx.theme().foreground))
-                        .child(self.menu_bar.clone())
+                        .child(
+                            Icon::new(Icon::empty())
+                                .path("icons/logo/jot-logo-grand-hotel.svg")
+                                .with_size(px(5.5))
+                                .text_color(cx.theme().foreground),
+                        )
+                        .child(self.menu_bar.clone()),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(div().text_sm().text_color(cx.theme().foreground).child(display_title))
+                    div().flex_1().flex().items_center().justify_center().child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().foreground)
+                            .child(display_title),
+                    ),
                 )
-                .child(div().w(px(100.))) 
+                .child(div().w(px(100.))),
         )
     }
 }

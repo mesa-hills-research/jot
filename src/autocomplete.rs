@@ -186,10 +186,10 @@ const CODE_SCORE_THRESHOLD: f64 = 0.2;
 /// normalization of n-gram context keys.
 const FUNCTION_WORDS: &[&str] = &[
     "the", "be", "to", "of", "and", "a", "an", "in", "that", "have", "it", "for", "not", "on",
-    "with", "he", "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we",
-    "her", "she", "or", "will", "my", "one", "all", "would", "there", "their", "what", "so",
-    "if", "is", "was", "are", "were", "been", "has", "had", "can", "could", "should", "i",
-    "another", "each", "every", "these", "those", "many", "several", "few", "both",
+    "with", "he", "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "her",
+    "she", "or", "will", "my", "one", "all", "would", "there", "their", "what", "so", "if", "is",
+    "was", "are", "were", "been", "has", "had", "can", "could", "should", "i", "another", "each",
+    "every", "these", "those", "many", "several", "few", "both",
 ];
 
 struct TrieNode {
@@ -694,10 +694,7 @@ fn commit_extracted_word<'a>(
 }
 
 /// Extracts learnable words grouped into contiguous n-gram sequences.
-fn extract_sentences_and_words(
-    text: &str,
-    cursor_offset: Option<usize>,
-) -> Vec<Vec<&str>> {
+fn extract_sentences_and_words(text: &str, cursor_offset: Option<usize>) -> Vec<Vec<&str>> {
     let mut sequences = Vec::new();
     let mut current = Vec::new();
     let mut word_start = None;
@@ -711,21 +708,14 @@ fn extract_sentences_and_words(
         }
 
         if let Some(start) = word_start.take() {
-            let skip = cursor_offset
-                .is_some_and(|cursor| cursor >= start && cursor <= index);
+            let skip = cursor_offset.is_some_and(|cursor| cursor >= start && cursor <= index);
 
             if skip {
                 if !current.is_empty() {
                     sequences.push(std::mem::take(&mut current));
                 }
             } else {
-                commit_extracted_word(
-                    text,
-                    start,
-                    index,
-                    &mut sequences,
-                    &mut current,
-                );
+                commit_extracted_word(text, start, index, &mut sequences, &mut current);
             }
         }
 
@@ -822,11 +812,9 @@ fn previous_two_words(text: &str, from: usize) -> (Option<&str>, Option<&str>) {
 
 /// Determines whether a word is a singular-oriented determiner.
 fn is_singular_determiner(word: &str) -> bool {
-    [
-        "a", "an", "this", "that", "one", "another", "each", "every",
-    ]
-    .iter()
-    .any(|candidate| candidate.eq_ignore_ascii_case(word))
+    ["a", "an", "this", "that", "one", "another", "each", "every"]
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(word))
 }
 
 /// Determines whether a word is a plural-oriented determiner.
@@ -839,8 +827,8 @@ fn is_plural_determiner(word: &str) -> bool {
 /// Detects words that make a two-token determiner scope inference unsafe.
 fn breaks_determiner_scope(word: &str) -> bool {
     [
-        "of", "to", "for", "with", "in", "on", "by", "from", "and", "or", "but", "which",
-        "who", "is", "are", "was", "were", "has", "have", "had",
+        "of", "to", "for", "with", "in", "on", "by", "from", "and", "or", "but", "which", "who",
+        "is", "are", "was", "were", "has", "have", "had",
     ]
     .iter()
     .any(|candidate| candidate.eq_ignore_ascii_case(word))
@@ -1009,10 +997,7 @@ fn looks_like_identifier(token: &str) -> bool {
         return false;
     }
 
-    if token.contains("::")
-        || token.contains("->")
-        || token.contains("=>")
-        || token.contains("()")
+    if token.contains("::") || token.contains("->") || token.contains("=>") || token.contains("()")
     {
         return true;
     }
@@ -1043,9 +1028,7 @@ fn looks_like_identifier(token: &str) -> bool {
         }
     }
 
-    (has_underscore && has_alpha)
-        || (has_digit && has_alpha)
-        || (internal_upper && has_lower)
+    (has_underscore && has_alpha) || (has_digit && has_alpha) || (internal_upper && has_lower)
 }
 
 /// Scores a line on a code-versus-prose axis in `[-1, 1]`.
@@ -1156,10 +1139,7 @@ fn classify_context(text: &str, offset: usize) -> TextContext {
     let mut position = text[offset..].find('\n').map(|index| offset + index + 1);
 
     while let Some(start) = position {
-        if taken >= below_weights.len()
-            || scanned > CLASSIFY_FORWARD_BYTES
-            || start >= text.len()
-        {
+        if taken >= below_weights.len() || scanned > CLASSIFY_FORWARD_BYTES || start >= text.len() {
             break;
         }
 
@@ -1307,15 +1287,11 @@ fn contextual_score(count: u32, total: u32, strongest: u32, weight: f64) -> f64 
         return 0.0;
     }
 
-    let reliability =
-        total as f64 / (total as f64 + CONTEXT_RELIABILITY_SUPPORT);
+    let reliability = total as f64 / (total as f64 + CONTEXT_RELIABILITY_SUPPORT);
 
     if count > 0 {
         let probability = count as f64 / total as f64;
-        return weight
-            * reliability
-            * (1.0 + count as f64).ln()
-            * probability.sqrt();
+        return weight * reliability * (1.0 + count as f64).ln() * probability.sqrt();
     }
 
     if total < CONTEXT_MISS_MIN_TOTAL {
@@ -1324,10 +1300,7 @@ fn contextual_score(count: u32, total: u32, strongest: u32, weight: f64) -> f64 
 
     let concentration = strongest as f64 / total as f64;
 
-    -weight
-        * CONTEXT_MISS_PENALTY
-        * reliability
-        * concentration
+    -weight * CONTEXT_MISS_PENALTY * reliability * concentration
 }
 
 /// Scores a candidate from unigram and confidence-weighted context evidence.
@@ -1339,8 +1312,7 @@ fn candidate_score(
     shared: &SharedVocabulary,
     local: &WordIndex,
 ) -> (f64, u32) {
-    let unigram =
-        candidate.shared as f64 + LOCAL_FREQ_WEIGHT * candidate.local as f64;
+    let unigram = candidate.shared as f64 + LOCAL_FREQ_WEIGHT * candidate.local as f64;
 
     let mut score = (1.0 + unigram).ln();
     let mut context_count = 0;
@@ -1372,10 +1344,7 @@ fn candidate_score(
 
 /// Determines whether the candidate map contains a singular form related to
 /// a possible plural candidate.
-fn has_singular_peer(
-    word: &str,
-    candidates: &HashMap<String, Candidate>,
-) -> bool {
+fn has_singular_peer(word: &str, candidates: &HashMap<String, Candidate>) -> bool {
     word.strip_suffix("es")
         .is_some_and(|base| !base.is_empty() && candidates.contains_key(base))
         || word
@@ -1385,10 +1354,7 @@ fn has_singular_peer(
 
 /// Determines whether the candidate map contains a plural form related to a
 /// possible singular candidate.
-fn has_plural_peer(
-    word: &str,
-    candidates: &HashMap<String, Candidate>,
-) -> bool {
+fn has_plural_peer(word: &str, candidates: &HashMap<String, Candidate>) -> bool {
     let with_s = format!("{}s", word);
     let with_es = format!("{}es", word);
 
@@ -1415,10 +1381,7 @@ fn number_agreement_adjustment(
 }
 
 /// Returns whether a one-character suffix is useful enough to display.
-fn should_display_one_character_suffix(
-    candidate: &Candidate,
-    context_count: u32,
-) -> bool {
+fn should_display_one_character_suffix(candidate: &Candidate, context_count: u32) -> bool {
     if candidate.suffix.chars().count() != 1 {
         return true;
     }
@@ -1451,11 +1414,7 @@ fn merged_best(
 
     let (word, count) = totals
         .into_iter()
-        .max_by(|left, right| {
-            left.1
-                .cmp(&right.1)
-                .then_with(|| right.0.cmp(left.0))
-        })?;
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(left.0)))?;
 
     Some((word.to_string(), count, total))
 }
@@ -1493,11 +1452,7 @@ fn valid_prediction(
 ) -> bool {
     word != previous
         && is_prose_shaped(word)
-        && shared.is_trusted(
-            word,
-            shared.word_freq(word),
-            local.word_freq(word),
-        )
+        && shared.is_trusted(word, shared.word_freq(word), local.word_freq(word))
 }
 
 /// Predicts the next word after a completed word and a space.
@@ -1554,8 +1509,7 @@ fn extend_suggestion(
     let mut cumulative = 1.0;
 
     for step in 0..limit {
-        let Some((word, count, total)) =
-            follow_stats(shared, local, prior.as_deref(), &last)
+        let Some((word, count, total)) = follow_stats(shared, local, prior.as_deref(), &last)
         else {
             break;
         };
@@ -1573,9 +1527,7 @@ fn extend_suggestion(
             EXTEND_SECOND_MIN_PROB
         };
 
-        if count < EXTEND_MIN_COUNT
-            || probability < threshold
-            || cumulative < EXTEND_MIN_CUMULATIVE
+        if count < EXTEND_MIN_COUNT || probability < threshold || cumulative < EXTEND_MIN_CUMULATIVE
         {
             break;
         }
@@ -1584,11 +1536,7 @@ fn extend_suggestion(
             break;
         }
 
-        if !shared.is_trusted(
-            &word,
-            shared.word_freq(&word),
-            local.word_freq(&word),
-        ) {
+        if !shared.is_trusted(&word, shared.word_freq(&word), local.word_freq(&word)) {
             break;
         }
 
@@ -1626,8 +1574,7 @@ fn generate_suggestion(
         }
 
         let previous = previous?;
-        let first =
-            predict_next_word(shared, local, previous, previous_two)?;
+        let first = predict_next_word(shared, local, previous, previous_two)?;
 
         let mut result = first.clone();
 
@@ -1665,35 +1612,19 @@ fn generate_suggestion(
                 continue;
             }
 
-            if !shared.is_trusted(
-                word,
-                candidate.shared,
-                candidate.local,
-            ) {
+            if !shared.is_trusted(word, candidate.shared, candidate.local) {
                 continue;
             }
         }
 
-        let (mut score, context_count) = candidate_score(
-            word,
-            candidate,
-            previous,
-            previous_two,
-            shared,
-            local,
-        );
+        let (mut score, context_count) =
+            candidate_score(word, candidate, previous, previous_two, shared, local);
 
         if context == TextContext::Prose {
-            score += number_agreement_adjustment(
-                word,
-                &candidates,
-                preference,
-            );
+            score += number_agreement_adjustment(word, &candidates, preference);
         }
 
-        if prefix_characters < MIN_PREFIX_LEN
-            && context_count < SHORT_PREFIX_MIN_CONTEXT
-        {
+        if prefix_characters < MIN_PREFIX_LEN && context_count < SHORT_PREFIX_MIN_CONTEXT {
             continue;
         }
 
@@ -1709,12 +1640,7 @@ fn generate_suggestion(
             .0
             .partial_cmp(&left.0)
             .unwrap_or(Ordering::Equal)
-            .then_with(|| {
-                left.2
-                    .chars()
-                    .count()
-                    .cmp(&right.2.chars().count())
-            })
+            .then_with(|| left.2.chars().count().cmp(&right.2.chars().count()))
             .then_with(|| left.2.cmp(right.2))
     });
 
@@ -1723,10 +1649,7 @@ fn generate_suggestion(
     let best_word = scored[0].2.as_str();
     let best_candidate = scored[0].3;
 
-    if !should_display_one_character_suffix(
-        best_candidate,
-        best_context_count,
-    ) {
+    if !should_display_one_character_suffix(best_candidate, best_context_count) {
         return None;
     }
 
@@ -1736,8 +1659,7 @@ fn generate_suggestion(
         return Some(result);
     }
 
-    let dominant = scored.len() < 2
-        || best_score >= scored[1].0 + std::f64::consts::LN_2;
+    let dominant = scored.len() < 2 || best_score >= scored[1].0 + std::f64::consts::LN_2;
 
     if dominant {
         extend_suggestion(
@@ -1762,10 +1684,7 @@ pub struct JotCompletionProvider {
 }
 
 impl JotCompletionProvider {
-    pub fn new(
-        shared_vocab: Rc<RefCell<SharedVocabulary>>,
-        enabled: Rc<Cell<bool>>,
-    ) -> Self {
+    pub fn new(shared_vocab: Rc<RefCell<SharedVocabulary>>, enabled: Rc<Cell<bool>>) -> Self {
         Self {
             shared_vocab,
             local_index: RefCell::new(WordIndex::new()),
@@ -1776,27 +1695,21 @@ impl JotCompletionProvider {
 
     /// Learns the most recently committed prose sentence before the cursor.
     fn learn_preceding_sentence(&self, text: &str, offset: usize) {
-        let search_floor = floor_char_boundary(
-            text,
-            offset.saturating_sub(TERMINATOR_SEARCH_BYTES),
-        );
+        let search_floor =
+            floor_char_boundary(text, offset.saturating_sub(TERMINATOR_SEARCH_BYTES));
 
         let search_window = &text[search_floor..offset];
 
         let Some(relative_terminator) =
-            search_window.rfind(|character: char| {
-                is_sentence_terminator(character)
-            })
+            search_window.rfind(|character: char| is_sentence_terminator(character))
         else {
             return;
         };
 
         let terminator_offset = search_floor + relative_terminator;
 
-        let inner_floor = floor_char_boundary(
-            text,
-            terminator_offset.saturating_sub(SENTENCE_SCAN_BYTES),
-        );
+        let inner_floor =
+            floor_char_boundary(text, terminator_offset.saturating_sub(SENTENCE_SCAN_BYTES));
 
         let inner = &text[inner_floor..terminator_offset];
 
@@ -1847,19 +1760,13 @@ impl JotCompletionProvider {
                 }
 
                 for triple in words.windows(3) {
-                    shared.learn_trigram(
-                        triple[0],
-                        triple[1],
-                        triple[2],
-                    );
+                    shared.learn_trigram(triple[0], triple[1], triple[2]);
                 }
             }
         }
 
         if learned_any {
-            self.learned_occurrences
-                .borrow_mut()
-                .insert(occurrence);
+            self.learned_occurrences.borrow_mut().insert(occurrence);
         }
     }
 }
@@ -1876,12 +1783,7 @@ impl CompletionProvider for JotCompletionProvider {
         Task::ready(Ok(CompletionResponse::Array(Vec::new())))
     }
 
-    fn is_completion_trigger(
-        &self,
-        _offset: usize,
-        new_text: &str,
-        _cx: &mut App,
-    ) -> bool {
+    fn is_completion_trigger(&self, _offset: usize, new_text: &str, _cx: &mut App) -> bool {
         if !self.enabled.get() {
             return false;
         }
@@ -1904,16 +1806,11 @@ impl CompletionProvider for JotCompletionProvider {
         _cx: &mut App,
     ) -> Task<anyhow::Result<InlineCompletionResponse>> {
         if !self.enabled.get() {
-            return Task::ready(Ok(
-                InlineCompletionResponse::Array(Vec::new()),
-            ));
+            return Task::ready(Ok(InlineCompletionResponse::Array(Vec::new())));
         }
 
         let text = rope.to_string();
-        let offset = floor_char_boundary(
-            &text,
-            offset.min(text.len()),
-        );
+        let offset = floor_char_boundary(&text, offset.min(text.len()));
 
         self.learn_preceding_sentence(&text, offset);
 
@@ -1926,12 +1823,7 @@ impl CompletionProvider for JotCompletionProvider {
             let shared = self.shared_vocab.borrow();
             let local = self.local_index.borrow();
 
-            generate_suggestion(
-                &shared,
-                &local,
-                &text,
-                offset,
-            )
+            generate_suggestion(&shared, &local, &text, offset)
         };
 
         let items = match suggestion {
@@ -1940,15 +1832,11 @@ impl CompletionProvider for JotCompletionProvider {
                 filter_text: None,
                 range: None,
                 command: None,
-                insert_text_format: Some(
-                    InsertTextFormat::PLAIN_TEXT,
-                ),
+                insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
             }],
             None => Vec::new(),
         };
 
-        Task::ready(Ok(
-            InlineCompletionResponse::Array(items),
-        ))
+        Task::ready(Ok(InlineCompletionResponse::Array(items)))
     }
 }

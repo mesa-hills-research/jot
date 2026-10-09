@@ -1,5 +1,5 @@
 use crate::autocomplete::{JotCompletionProvider, SharedVocabulary};
-use crate::spell::{Dictionary, SpellIssue, SpellScanner, SPELL_CHECK_DEBOUNCE};
+use crate::spell::{Dictionary, SPELL_CHECK_DEBOUNCE, SpellIssue, SpellScanner};
 use crate::spell_actions::SpellCodeActionProvider;
 use gpui_kit::component::highlighter::{Diagnostic, DiagnosticSeverity};
 use gpui_kit::component::input::{EditorState, InputEvent, Position, RopeExt};
@@ -232,10 +232,7 @@ impl Document {
     /// Existing squiggles are republished immediately (remapped for the
     /// edit) so they do not blink out during the debounce window, and a full
     /// re-scan is scheduled.
-    fn observe_editor(
-        editor_state: &Entity<EditorState>,
-        cx: &mut Context<Self>,
-    ) -> Subscription {
+    fn observe_editor(editor_state: &Entity<EditorState>, cx: &mut Context<Self>) -> Subscription {
         cx.subscribe(editor_state, |this, _, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
                 this.republish_existing_issues(cx);
@@ -293,7 +290,11 @@ impl Document {
             }
 
             let cursor_line = state.cursor_position().line as i64;
-            let edit_line = if delta > 0 { cursor_line - delta } else { cursor_line };
+            let edit_line = if delta > 0 {
+                cursor_line - delta
+            } else {
+                cursor_line
+            };
 
             let mut kept: Vec<SpellIssue> = Vec::new();
             for mut issue in issues.borrow_mut().drain(..) {

@@ -1,13 +1,15 @@
 use crate::state::{AppEvent, AppState};
-use gpui_kit::{
-    div, px, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
-};
 use gpui_kit::component::{
+    ActiveTheme, IconName,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
+    h_flex,
     select::{SearchableVec, Select, SelectEvent, SelectState},
-    ActiveTheme, IconName, h_flex, v_flex,
+    v_flex,
+};
+use gpui_kit::{
+    App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 
 pub struct SettingsPanel {
@@ -17,11 +19,7 @@ pub struct SettingsPanel {
 }
 
 impl SettingsPanel {
-    pub fn new(
-        app_state: Entity<AppState>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(app_state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let themes = Self::get_theme_names(cx);
         let current_theme = app_state.read(cx).settings.theme.clone();
 
@@ -112,19 +110,14 @@ impl Render for SettingsPanel {
                             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                             .child("Settings"),
                     )
-                    .child(
-                        Button::new("back")
-                            .ghost()
-                            .icon(IconName::Close)
-                            .on_click({
-                                let app_state = self.app_state.clone();
-                                move |_, _, cx| {
-                                    app_state.update(cx, |state, cx| {
-                                        state.show_editor(cx);
-                                    });
-                                }
-                            }),
-                    ),
+                    .child(Button::new("back").ghost().icon(IconName::Close).on_click({
+                        let app_state = self.app_state.clone();
+                        move |_, _, cx| {
+                            app_state.update(cx, |state, cx| {
+                                state.show_editor(cx);
+                            });
+                        }
+                    })),
             )
             .child(
                 v_flex()

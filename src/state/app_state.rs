@@ -175,12 +175,7 @@ impl AppState {
         }
     }
 
-    pub fn open_as_template(
-        &mut self,
-        path: PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn open_as_template(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         match std::fs::read_to_string(&path) {
             Ok(content) => {
                 if !content.is_empty() && String::from_utf8(content.as_bytes().to_vec()).is_err() {
@@ -195,12 +190,7 @@ impl AppState {
         }
     }
 
-    fn new_from_template(
-        &mut self,
-        content: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn new_from_template(&mut self, content: String, window: &mut Window, cx: &mut Context<Self>) {
         let number = if self.untitled_counter == 1 {
             None
         } else {
@@ -285,12 +275,7 @@ impl AppState {
         Ok(())
     }
 
-    pub fn document_saved(
-        &mut self,
-        doc: Entity<Document>,
-        path: PathBuf,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn document_saved(&mut self, doc: Entity<Document>, path: PathBuf, cx: &mut Context<Self>) {
         doc.update(cx, |doc, cx| {
             doc.set_path(path);
             doc.mark_saved(cx);
@@ -465,12 +450,7 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn on_open_settings(
-        &mut self,
-        _: &OpenSettings,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn on_open_settings(&mut self, _: &OpenSettings, _: &mut Window, cx: &mut Context<Self>) {
         self.show_settings(cx);
     }
 

@@ -1,9 +1,9 @@
-use gpui_kit::{
-    div, px, App, ClickEvent, ElementId, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement, prelude::FluentBuilder, RenderOnce, SharedString,
-    StatefulInteractiveElement, Styled, Window,
-};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Selectable, h_flex};
+use gpui_kit::{
+    App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
+    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder, px,
+};
 use std::rc::Rc;
 
 #[derive(IntoElement)]
@@ -87,7 +87,7 @@ impl RenderOnce for JotTab {
 
         let close_button_visible = self.selected;
         let tab_id = self.id.clone();
-        
+
         let side_element_width = px(20.);
 
         div()
@@ -133,10 +133,7 @@ impl RenderOnce for JotTab {
                             .justify_center()
                             .when(self.dirty, |this| {
                                 this.child(
-                                    div()
-                                        .size(px(8.))
-                                        .rounded_full()
-                                        .bg(cx.theme().foreground),
+                                    div().size(px(8.)).rounded_full().bg(cx.theme().foreground),
                                 )
                             }),
                     )
