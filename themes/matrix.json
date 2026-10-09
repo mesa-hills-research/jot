@@ -21,15 +21,15 @@
         "danger.foreground": "#0D0208",
         "danger.hover.background": "#FF0000",
         "foreground": "#88FF88",
-        "input.border": "#003200",
+        "input.border": "#023401",
         "link.active.foreground": "#00FF00",
         "link.foreground": "#00FF00",
         "link.hover.foreground": "#00FF00",
-        "list.active.background": "#00FF0011",
+        "list.active.background": "#00FF001A",
         "list.active.border": "#00FF00",
         "list.even.background": "#00190066",
         "muted.background": "#001900",
-        "muted.foreground": "#007700",
+        "muted.foreground": "#2D9129",
         "panel.background": "#001900",
         "popover.background": "#020D02",
         "popover.foreground": "#00FF00",
@@ -51,9 +51,17 @@
         "base.red": "#FF0000",
         "base.green": "#00FF00",
         "base.yellow": "#ffea00",
-        "base.blue": "#0000ff",
+        "base.blue": "#0540ff",
         "base.magenta": "#FF00FF",
-        "base.cyan": "#00ffd5"
+        "base.cyan": "#00ffd5",
+        "chart.2": "#353AFF",
+        "chart.3": "#0540FF",
+        "chart.4": "#0A45F6",
+        "chart.5": "#1D50D8",
+        "description_list.label.foreground": "#2B9027",
+        "switch.background": "#143212",
+        "table.active.background": "#00FF001A",
+        "table.head.foreground": "#258B22"
       },
       "highlight": {
         "editor.foreground": "#88FF88",
@@ -83,11 +91,11 @@
             "color": "#ffd700"
           },
           "comment": {
-            "color": "#007700",
+            "color": "#48A942",
             "font_style": "italic"
           },
           "comment.doc": {
-            "color": "#007700",
+            "color": "#48A942",
             "font_style": "italic"
           },
           "constant": {
@@ -103,7 +111,7 @@
             "color": "#ffd700"
           },
           "keyword": {
-            "color": "#FF0000"
+            "color": "#FF5F4D"
           },
           "link_text": {
             "color": "#3fd43a",
@@ -114,7 +122,7 @@
             "font_style": "italic"
           },
           "number": {
-            "color": "#FF0000"
+            "color": "#FF5F4D"
           },
           "string": {
             "color": "#82d967"
@@ -148,7 +156,7 @@
             "color": "#88FF88"
           },
           "variable.special": {
-            "color": "#FF0000"
+            "color": "#FF5F4D"
           }
         }
       }

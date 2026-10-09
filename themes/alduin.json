@@ -12,7 +12,7 @@
         "accent.foreground": "#ebdbb2",
         "background": "#1C1C1C",
         "border": "#3a3a3a",
-        "danger.background": "#cc241d",
+        "danger.background": "#f04b3e",
         "danger.active.background": "#cc241d",
         "danger.hover.background": "#fb4934",
         "foreground": "#9E9E9E",
@@ -20,17 +20,17 @@
         "link.active.foreground": "#83a598",
         "link.foreground": "#83a598",
         "link.hover.foreground": "#83a598",
-        "list.active.background": "#262626",
+        "list.active.background": "#666666",
         "list.active.border": "#9E9E9E",
         "list.even.background": "#262626",
         "list.head.background": "#1C1C1C",
         "muted.background": "#1c1816",
-        "muted.foreground": "#878787",
+        "muted.foreground": "#909090",
         "panel.background": "#282828",
         "popover.background": "#141414",
         "popover.foreground": "#ebdbb2",
         "primary.active.background": "#45858899",
-        "primary.background": "#458588",
+        "primary.background": "#37777A",
         "primary.foreground": "#F0F0F0",
         "primary.hover.background": "#458588AA",
         "scrollbar.background": "#28282800",
@@ -53,7 +53,20 @@
         "base.magenta": "#af8787",
         "base.magenta.light": "#af878788",
         "base.red": "#8b5f61",
-        "base.yellow": "#9d906c"
+        "base.yellow": "#9d906c",
+        "button.foreground": "#A6A6A6",
+        "button.primary.background": "#37777A",
+        "button.secondary.hover.background": "#3A363499",
+        "danger.foreground": "#1F1F1F",
+        "description_list.label.foreground": "#898989",
+        "info.foreground": "#202020",
+        "sidebar.accent.background": "#312E2C",
+        "sidebar.primary.background": "#37777A",
+        "success.background": "#7E8C63",
+        "success.foreground": "#1A1A1A",
+        "switch.background": "#393532",
+        "table.active.background": "#66666633",
+        "warning.foreground": "#2A2A2A"
       },
       "highlight": {
         "editor.foreground": "#DDDDDD",
@@ -98,11 +111,11 @@
             "color": "#E19773"
           },
           "link_text": {
-            "color": "#A86D3B",
+            "color": "#AB703E",
             "font_style": "normal"
           },
           "link_uri": {
-            "color": "#6F6D66",
+            "color": "#7F7D75",
             "font_style": "italic"
           },
           "number": {
@@ -130,11 +143,11 @@
             "color": "#E1D797"
           },
           "title": {
-            "color": "#A76D3B",
+            "color": "#AA703E",
             "font_weight": 600
           },
           "type": {
-            "color": "#A86D3B"
+            "color": "#AB703E"
           },
           "property": {
             "color": "#CACCCA"

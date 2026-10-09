@@ -14,11 +14,11 @@
         "border": "#343434",
         "foreground": "#dcdcdc",
         "input.border": "#3e3e3e",
-        "list.active.background": "#CDA86911",
+        "list.active.background": "#CDA8691D",
         "list.active.border": "#CDA86988",
         "list.even.background": "#1E1E1E99",
         "muted.background": "#2e2e2e88",
-        "muted.foreground": "#828282",
+        "muted.foreground": "#898989",
         "panel.background": "#1e1e1e",
         "popover.background": "#171717",
         "popover.foreground": "#dcdcdc",
@@ -44,12 +44,23 @@
         "base.green.light": "#ccd88c",
         "base.yellow": "#c2a86c",
         "base.yellow.light": "#e2c47e",
-        "base.blue": "#44474a",
+        "base.blue": "#5f6265",
         "base.blue.light": "#5a5e62",
         "base.magenta": "#b4be7c",
         "base.magenta.light": "#d0dc8e99",
         "base.cyan": "#778385",
-        "base.cyan.light": "#8a989b"
+        "base.cyan.light": "#8a989b",
+        "button.secondary.hover.background": "#2a2a2a",
+        "chart.2": "#5f6266",
+        "chart.3": "#5f6265",
+        "chart.4": "#5f6265",
+        "chart.5": "#606264",
+        "danger.foreground": "#1b1b1b",
+        "info.background": "#7b8789",
+        "ring": "#676b6e",
+        "sidebar.accent.background": "#292929",
+        "switch.background": "#313131",
+        "table.active.background": "#cda8691d"
       },
       "highlight": {
         "editor.foreground": "#DDDDDD",
@@ -63,6 +74,7 @@
         "hint": "#b283f8",
         "modified": "#B0A878",
         "predictive": "#5D5945",
+        "info": "#575a5d",
         "syntax": {
           "attribute": {
             "color": "#be9a52"
@@ -92,11 +104,11 @@
             "color": "#E19773"
           },
           "link_text": {
-            "color": "#A86D3B",
+            "color": "#AB703E",
             "font_style": "normal"
           },
           "link_uri": {
-            "color": "#6F6D66",
+            "color": "#7F7D75",
             "font_style": "italic"
           },
           "number": {
@@ -124,11 +136,11 @@
             "color": "#E1D797"
           },
           "title": {
-            "color": "#A76D3B",
+            "color": "#AA703E",
             "font_weight": 600
           },
           "type": {
-            "color": "#A86D3B"
+            "color": "#AB703E"
           },
           "property": {
             "color": "#CACCCA"

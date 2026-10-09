@@ -14,11 +14,11 @@
         "border": "#333333",
         "foreground": "#a8a49d",
         "input.border": "#333333",
-        "list.active.background": "#B196C622",
+        "list.active.background": "#CFB3E422",
         "list.active.border": "#B196C699",
         "list.even.background": "#18151B77",
         "muted.background": "#23232355",
-        "muted.foreground": "#726E69",
+        "muted.foreground": "#7F7B76",
         "panel.background": "#003a5b",
         "popover.background": "#010101",
         "popover.foreground": "#a8a49d",
@@ -45,10 +45,15 @@
         "base.magenta": "#b296c6",
         "base.magenta.light": "#b296c699",
         "base.yellow": "#f8b63f",
-        "base.yellow.light": "#f8b63f99"
+        "base.yellow.light": "#f8b63f99",
+        "description_list.label.foreground": "#7d7973",
+        "sidebar.accent.background": "#201d24",
+        "switch.background": "#282828",
+        "table.active.background": "#cfb3e422",
+        "table.head.foreground": "#79756f"
       },
       "highlight": {
-        "editor.foreground": "#a8a49d",
+        "editor.foreground": "#ccc7c0",
         "editor.background": "#010101",
         "editor.active_line.background": "#18151B",
         "editor.line_number": "#726E69",
@@ -75,11 +80,11 @@
             "color": "#f8b63f"
           },
           "comment": {
-            "color": "#726E69",
+            "color": "#837F7A",
             "font_style": "italic"
           },
           "comment.doc": {
-            "color": "#726E69",
+            "color": "#837F7A",
             "font_style": "italic"
           },
           "constant": {
