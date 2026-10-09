@@ -74,7 +74,9 @@ impl AppState {
                 cx.background_executor()
                     .timer(VOCABULARY_SAVE_INTERVAL)
                     .await;
-                let saved = this.update(cx, |this, _| this.shared_vocabulary.borrow_mut().save());
+                let saved = this.update(cx, |this, cx| {
+                    SharedVocabulary::save_in_background(&this.shared_vocabulary, cx).detach()
+                });
                 if saved.is_err() {
                     break;
                 }
@@ -346,7 +348,7 @@ impl AppState {
             doc.mark_saved(cx);
         });
 
-        self.shared_vocabulary.borrow_mut().save();
+        SharedVocabulary::save_in_background(&self.shared_vocabulary, cx).detach();
 
         cx.emit(AppEvent::DirtyStateChanged);
         cx.notify();
@@ -359,7 +361,7 @@ impl AppState {
             doc.mark_saved(cx);
         });
 
-        self.shared_vocabulary.borrow_mut().save();
+        SharedVocabulary::save_in_background(&self.shared_vocabulary, cx).detach();
 
         cx.emit(AppEvent::DirtyStateChanged);
         cx.notify();
@@ -369,7 +371,7 @@ impl AppState {
         if index >= self.documents.len() {
             return;
         }
-        self.shared_vocabulary.borrow_mut().save();
+        SharedVocabulary::save_in_background(&self.shared_vocabulary, cx).detach();
         self.remove_tab(index, window, cx);
     }
 

@@ -33,6 +33,12 @@
 //! the entries it has seen least, and goes on learning. A file that doesn't
 //! parse is kept aside rather than written over.
 //!
+//! Saves run on a background thread, so typing never waits for one
+//! ([`SharedVocabulary::save_in_background`]). Quitting and closing the
+//! window save on the UI thread, since the save has to finish
+//! ([`SharedVocabulary::save`]), after waiting for a background save under
+//! way. Learning while a background save runs stays for the next save.
+//!
 //! # Several jots at once
 //!
 //! Each running jot loads the file once, at startup, and learns on its own.
@@ -59,14 +65,17 @@ use super::{
     sentence_runs,
 };
 use crate::spell::Dictionary;
+use gpui_kit::{App, BackgroundExecutor, Task};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, TryLockError};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// The context that stands for the start of a sentence. No word is written
@@ -187,7 +196,7 @@ impl Forms {
 }
 
 /// The words that followed one context, by folded form, with counts.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(super) struct Successors {
     total: u32,
     counts: HashMap<Box<str>, u32>,
@@ -259,7 +268,7 @@ impl Successors {
 }
 
 /// Words and n-grams with their counts.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Counts {
     /// Every word by folded form, in order, for looking words up by prefix.
     words: BTreeMap<Box<str>, Forms>,
@@ -683,11 +692,138 @@ fn pruned_json(counts: &mut Counts, cap: u64) -> serde_json::Result<Vec<u8>> {
     Ok(data)
 }
 
+/// A save's work, which can run off the UI thread: adding what was learned
+/// to the file under its lock.
+struct SaveJob {
+    path: PathBuf,
+    cap: u64,
+    lock_wait: Duration,
+    /// What was learned since the last save.
+    learned: Counts,
+    /// The whole vocabulary, to write in place of a file gone or damaged. A
+    /// background save copies it only once a save has found it needed.
+    whole: Option<Counts>,
+}
+
+/// What a [`SaveJob`] did.
+enum Saved {
+    /// It wrote the file. These are its counts.
+    Written(Counts),
+    /// Nothing: the file is gone or damaged, and the job had no whole
+    /// vocabulary to write in its place.
+    NeedsWhole,
+}
+
+impl SaveJob {
+    /// Takes the lock, reads the file, adds the learning, prunes to the cap
+    /// and writes the file whole: beside the old one first, which it then
+    /// replaces, so a crash leaves one or the other whole. On an error the
+    /// job keeps its learning and whole vocabulary.
+    fn run(&mut self) -> io::Result<Saved> {
+        let path = &self.path;
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let lock = match lock(path, self.lock_wait) {
+            Ok(lock) => Some(lock),
+            Err(error) if error.kind() == io::ErrorKind::TimedOut => return Err(error),
+            // A file system that can't lock files saves as if one jot ran.
+            Err(error) => {
+                log::warn!(
+                    "Couldn't lock the word suggestions' vocabulary {} ({error}). It is saved \
+                     without the lock.",
+                    path.display()
+                );
+                None
+            }
+        };
+        let mut merged = match read_file(path) {
+            Ok(Some(mut saved)) => {
+                saved.migrate();
+                let mut counts = Counts::from_saved(saved);
+                counts.add(&self.learned);
+                Some(counts)
+            }
+            // Gone or damaged, the file has nothing to add to this jot's
+            // vocabulary, which takes its place.
+            Ok(None) if self.whole.is_some() => None,
+            Err(ReadError::Damaged(error)) if self.whole.is_some() => {
+                match set_aside(path) {
+                    Ok(kept) => log::warn!(
+                        "The word suggestions' vocabulary {} is damaged ({error}). It was kept as \
+                         {}, and this session's vocabulary took its place.",
+                        path.display(),
+                        kept.display()
+                    ),
+                    Err(move_error) if move_error.kind() == io::ErrorKind::NotFound => {}
+                    Err(move_error) => {
+                        return Err(io::Error::other(format!(
+                            "it is damaged ({error}), and couldn't be moved aside ({move_error})"
+                        )));
+                    }
+                }
+                None
+            }
+            Ok(None) | Err(ReadError::Damaged(_)) => return Ok(Saved::NeedsWhole),
+            Err(ReadError::Unreadable(error)) => return Err(error),
+        };
+        let counts = match &mut merged {
+            Some(merged) => merged,
+            None => self.whole.as_mut().expect("a whole vocabulary"),
+        };
+        let data = pruned_json(counts, self.cap)?;
+        write_whole(path, &data)?;
+        drop(lock);
+        Ok(Saved::Written(match merged {
+            Some(merged) => merged,
+            None => self.whole.take().expect("a whole vocabulary"),
+        }))
+    }
+}
+
+/// A save begun on the UI thread, to run on another.
+struct BackgroundSave {
+    job: SaveJob,
+    result: mpsc::Sender<io::Result<Saved>>,
+}
+
+impl BackgroundSave {
+    fn run(mut self) {
+        let _ = self.result.send(self.job.run());
+    }
+}
+
+/// A save running in the background.
+struct InFlight {
+    /// The learning it took, which goes back to the unsaved learning if the
+    /// save fails.
+    learned: Counts,
+    /// Where its result arrives.
+    result: mpsc::Receiver<io::Result<Saved>>,
+}
+
+/// Frees `counts` on `executor`, off the UI thread: freeing a vocabulary at
+/// its size cap takes a fifth of a second.
+fn drop_in_background(counts: Option<Counts>, executor: &BackgroundExecutor) {
+    if let Some(counts) = counts {
+        executor.spawn(async move { drop(counts) }).detach();
+    }
+}
+
+/// Logs a save that failed. Its learning stays for the next save.
+fn log_failed_save(path: &Path, error: &io::Error) {
+    log::error!(
+        "Couldn't save the word suggestions' vocabulary {}: {error}. What was learned since \
+         the last save is kept for the next one.",
+        path.display()
+    );
+}
+
 /// The persistent, cross-document vocabulary learned from typed text.
 pub struct SharedVocabulary {
     counts: Counts,
-    /// What it learned since it last saved, which the next save adds to the
-    /// file.
+    /// What it learned since it last saved, or since a background save
+    /// began, which the next save adds to the file.
     unsaved: Counts,
     dictionary: Rc<Dictionary>,
     /// Whether there is anything to save: learning, or a file from an
@@ -698,6 +834,16 @@ pub struct SharedVocabulary {
     file: Option<PathBuf>,
     /// How long a save waits for another jot to finish saving.
     lock_wait: Duration,
+    /// The background save under way.
+    in_flight: Option<InFlight>,
+    /// Whether another save was asked for while one ran.
+    save_again: bool,
+    /// Whether the last background save found the file gone or damaged, so
+    /// the next one sends the whole vocabulary.
+    needs_whole: bool,
+    /// How many background saves began.
+    #[cfg(test)]
+    background_saves: usize,
 }
 
 impl SharedVocabulary {
@@ -710,6 +856,11 @@ impl SharedVocabulary {
             dirty: false,
             file: None,
             lock_wait: LOCK_WAIT,
+            in_flight: None,
+            save_again: false,
+            needs_whole: false,
+            #[cfg(test)]
+            background_saves: 0,
         }
     }
 
@@ -793,7 +944,10 @@ impl SharedVocabulary {
         self.dictionary.clone()
     }
 
-    /// Adds what it learned since its last save to the file, if anything.
+    /// Adds what it learned since its last save to the file, if anything,
+    /// on this thread. A background save under way is waited for first, so
+    /// its learning counts once. For quitting, and for closing the last
+    /// window, where the save has to finish.
     pub fn save(&mut self) {
         self.save_within(VOCAB_MAX_BYTES);
     }
@@ -801,81 +955,169 @@ impl SharedVocabulary {
     /// Saves in at most `cap` bytes, pruning to fit. What a save couldn't
     /// write stays for the next one.
     fn save_within(&mut self, cap: u64) {
+        self.finish_background_save(true);
         if !self.dirty {
             return;
         }
         let Some(path) = self.file.clone() else {
             return;
         };
-        if let Err(error) = self.merge_into(&path, cap) {
-            log::error!(
-                "Couldn't save the word suggestions' vocabulary {}: {error}. What was learned \
-                 since the last save is kept for the next one.",
-                path.display()
-            );
+        let mut job = SaveJob {
+            path,
+            cap,
+            lock_wait: self.lock_wait,
+            learned: std::mem::take(&mut self.unsaved),
+            whole: Some(std::mem::take(&mut self.counts)),
+        };
+        match job.run() {
+            Ok(Saved::Written(counts)) => {
+                self.counts = counts;
+                self.dirty = false;
+                self.needs_whole = false;
+            }
+            result => {
+                if let Err(error) = result {
+                    log_failed_save(&job.path, &error);
+                }
+                self.unsaved = job.learned;
+                self.counts = job.whole.take().unwrap_or_default();
+            }
         }
     }
 
-    /// Adds the unsaved learning to the file at `path` under its lock, writes
-    /// the file whole and takes the result as this vocabulary. The file is
-    /// written beside the old one and then takes its place, so a crash leaves
-    /// one or the other whole.
-    fn merge_into(&mut self, path: &Path, cap: u64) -> io::Result<()> {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let lock = match lock(path, self.lock_wait) {
-            Ok(lock) => Some(lock),
-            Err(error) if error.kind() == io::ErrorKind::TimedOut => return Err(error),
-            // A file system that can't lock files saves as if one jot ran.
-            Err(error) => {
-                log::warn!(
-                    "Couldn't lock the word suggestions' vocabulary {} ({error}). It is saved \
-                     without the lock.",
-                    path.display()
-                );
-                None
-            }
+    /// Saves as [`save`](Self::save) does, with the file's work on a
+    /// background thread, so the UI never waits for it. The task finishes
+    /// when the save does.
+    ///
+    /// The save takes what was learned up to now. Learning while it runs
+    /// stays unsaved for the next save, and once it is done the vocabulary is
+    /// the file as written plus that learning. A save asked for while one
+    /// runs follows it, once however often it was asked for. A save that
+    /// fails puts its learning back, so the next save adds it.
+    ///
+    /// Detach the task, or keep it. Dropping it is safe too: a save already
+    /// running finishes, and the next save takes in its result.
+    pub fn save_in_background(vocabulary: &Rc<RefCell<Self>>, cx: &App) -> Task<()> {
+        let Some(running) = Self::start_background_save(vocabulary, cx.background_executor())
+        else {
+            return Task::ready(());
         };
-        let mut merged = match read_file(path) {
-            Ok(Some(mut saved)) => {
-                saved.migrate();
-                let mut counts = Counts::from_saved(saved);
-                counts.add(&self.unsaved);
-                Some(counts)
-            }
-            // Gone or damaged, the file has nothing to add to this
-            // vocabulary, which takes its place.
-            Ok(None) => None,
-            Err(ReadError::Damaged(error)) => {
-                match set_aside(path) {
-                    Ok(kept) => log::warn!(
-                        "The word suggestions' vocabulary {} is damaged ({error}). It was kept as \
-                         {}, and this session's vocabulary took its place.",
-                        path.display(),
-                        kept.display()
-                    ),
-                    Err(move_error) if move_error.kind() == io::ErrorKind::NotFound => {}
-                    Err(move_error) => {
-                        return Err(io::Error::other(format!(
-                            "it is damaged ({error}), and couldn't be moved aside ({move_error})"
-                        )));
-                    }
+        let vocabulary = vocabulary.clone();
+        cx.spawn(async move |cx| {
+            let mut running = running;
+            loop {
+                running.await;
+                let (replaced, again) = {
+                    let mut this = vocabulary.borrow_mut();
+                    let replaced = this.finish_background_save(false);
+                    (replaced, std::mem::take(&mut this.save_again))
+                };
+                drop_in_background(replaced, cx.background_executor());
+                if !again {
+                    return;
                 }
+                match Self::start_background_save(&vocabulary, cx.background_executor()) {
+                    Some(next) => running = next,
+                    None => return,
+                }
+            }
+        })
+    }
+
+    /// Starts a save of the unsaved learning on `executor`, once a save
+    /// under way has finished.
+    fn start_background_save(
+        vocabulary: &Rc<RefCell<Self>>,
+        executor: &BackgroundExecutor,
+    ) -> Option<Task<()>> {
+        let (replaced, save) = {
+            let mut this = vocabulary.borrow_mut();
+            let replaced = this.finish_background_save(false);
+            (replaced, this.begin_background_save())
+        };
+        drop_in_background(replaced, executor);
+        let save = save?;
+        Some(executor.spawn(async move { save.run() }))
+    }
+
+    /// Takes the unsaved learning for a save on another thread. With a save
+    /// under way, or nothing to save, there is none, and a save under way
+    /// notes that another is wanted.
+    fn begin_background_save(&mut self) -> Option<BackgroundSave> {
+        if self.in_flight.is_some() {
+            self.save_again = true;
+            return None;
+        }
+        if !self.dirty {
+            return None;
+        }
+        let path = self.file.clone()?;
+        let learned = std::mem::take(&mut self.unsaved);
+        let job = SaveJob {
+            path,
+            cap: VOCAB_MAX_BYTES,
+            lock_wait: self.lock_wait,
+            learned: learned.clone(),
+            whole: self.needs_whole.then(|| self.counts.clone()),
+        };
+        let (sender, result) = mpsc::channel();
+        self.in_flight = Some(InFlight { learned, result });
+        self.dirty = false;
+        #[cfg(test)]
+        {
+            self.background_saves += 1;
+        }
+        Some(BackgroundSave {
+            job,
+            result: sender,
+        })
+    }
+
+    /// Takes in the result of the background save under way, when it has
+    /// one, waiting for it if `wait`. A save written becomes the vocabulary,
+    /// with the learning since it began on top, and the vocabulary it
+    /// replaces is returned, since freeing it takes a while. One that failed,
+    /// or never ran, puts its learning back.
+    fn finish_background_save(&mut self, wait: bool) -> Option<Counts> {
+        let in_flight = self.in_flight.take()?;
+        let result = if wait {
+            in_flight.result.recv().ok()
+        } else {
+            match in_flight.result.try_recv() {
+                Ok(result) => Some(result),
+                Err(mpsc::TryRecvError::Empty) => {
+                    self.in_flight = Some(in_flight);
+                    return None;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => None,
+            }
+        };
+        match result {
+            Some(Ok(Saved::Written(mut counts))) => {
+                counts.add(&self.unsaved);
+                self.needs_whole = false;
+                Some(std::mem::replace(&mut self.counts, counts))
+            }
+            result => {
+                match result {
+                    Some(Ok(Saved::NeedsWhole)) => {
+                        self.needs_whole = true;
+                        self.save_again = true;
+                    }
+                    Some(Err(error)) => {
+                        if let Some(path) = &self.file {
+                            log_failed_save(path, &error);
+                        }
+                    }
+                    _ => {}
+                }
+                let mut learned = in_flight.learned;
+                learned.add(&self.unsaved);
+                self.unsaved = learned;
+                self.dirty = true;
                 None
             }
-            Err(ReadError::Unreadable(error)) => return Err(error),
-        };
-        let counts = merged.as_mut().unwrap_or(&mut self.counts);
-        let data = pruned_json(counts, cap)?;
-        write_whole(path, &data)?;
-        drop(lock);
-        if let Some(merged) = merged {
-            self.counts = merged;
         }
-        self.unsaved = Counts::default();
-        self.dirty = false;
-        Ok(())
     }
 
     pub(super) fn counts(&self) -> &Counts {
@@ -1063,6 +1305,7 @@ pub(super) fn tally(text: &str) -> WordTally {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui_kit::TestAppContext;
 
     fn load(json: &str) -> SharedVocabulary {
         let mut vocabulary = SharedVocabulary::new();
@@ -1497,6 +1740,158 @@ mod tests {
         assert_eq!(bigram(&reloaded, "on", "topic7"), 1);
         assert_eq!(reloaded.counts.word_count("topic7"), 2);
         assert_eq!(bigram(&reloaded, "notes", "on"), 201);
+    }
+
+    /// A vocabulary on `scratch`'s file, shared as jot shares it.
+    fn shared(scratch: &Scratch) -> Rc<RefCell<SharedVocabulary>> {
+        Rc::new(RefCell::new(scratch.load()))
+    }
+
+    /// Starts a background save, as saving a file in jot does.
+    fn save_in_background(vocabulary: &Rc<RefCell<SharedVocabulary>>, cx: &mut TestAppContext) {
+        cx.update(|cx| SharedVocabulary::save_in_background(vocabulary, cx).detach());
+    }
+
+    /// What `vocabulary` holds, as it would save it whole.
+    fn held(vocabulary: &Rc<RefCell<SharedVocabulary>>) -> serde_json::Value {
+        serde_json::from_slice(&vocabulary.borrow().to_json().unwrap()).unwrap()
+    }
+
+    /// Learning while a background save runs is saved once, by the next
+    /// save. Meanwhile the vocabulary is the file as written, another jot's
+    /// learning included, plus that learning.
+    #[gpui_kit::test]
+    fn learning_during_a_background_save_counts_once(cx: &mut TestAppContext) {
+        let scratch = Scratch::new("background");
+        let vocabulary = shared(&scratch);
+        vocabulary.borrow_mut().learn_sentence("Ferns grow slowly");
+        save_in_background(&vocabulary, cx);
+        vocabulary.borrow_mut().learn_sentence("Mosses grow faster");
+        let mut other = scratch.load();
+        other.learn_sentence("Lichens grow nowhere");
+        other.save();
+        cx.run_until_parked();
+
+        assert_eq!(
+            saved(&scratch),
+            learned_from(["Lichens grow nowhere", "Ferns grow slowly"])
+        );
+        let all = [
+            "Lichens grow nowhere",
+            "Ferns grow slowly",
+            "Mosses grow faster",
+        ];
+        assert_eq!(held(&vocabulary), learned_from(all));
+        assert!(vocabulary.borrow().dirty);
+
+        save_in_background(&vocabulary, cx);
+        cx.run_until_parked();
+        assert_eq!(saved(&scratch), learned_from(all));
+        assert_eq!(held(&vocabulary), learned_from(all));
+        assert!(!vocabulary.borrow().dirty);
+    }
+
+    /// A background save that fails puts its learning back, and the next
+    /// save adds it.
+    #[gpui_kit::test]
+    fn a_failed_background_save_keeps_its_learning(cx: &mut TestAppContext) {
+        let scratch = Scratch::new("background-failed");
+        let vocabulary = shared(&scratch);
+        vocabulary.borrow_mut().lock_wait = Duration::from_millis(50);
+        vocabulary.borrow_mut().learn_sentence("Ferns grow slowly");
+        let held_lock = lock(&scratch.file(), Duration::ZERO).unwrap();
+        save_in_background(&vocabulary, cx);
+        vocabulary.borrow_mut().learn_sentence("Mosses grow faster");
+        cx.run_until_parked();
+        assert!(!scratch.file().exists());
+        assert!(vocabulary.borrow().dirty);
+        assert!(vocabulary.borrow().in_flight.is_none());
+
+        drop(held_lock);
+        save_in_background(&vocabulary, cx);
+        cx.run_until_parked();
+        let both = ["Ferns grow slowly", "Mosses grow faster"];
+        assert_eq!(saved(&scratch), learned_from(both));
+        assert_eq!(held(&vocabulary), learned_from(both));
+    }
+
+    /// Saves asked for while one runs make one more save after it.
+    #[gpui_kit::test]
+    fn saves_asked_for_during_a_save_make_one_more(cx: &mut TestAppContext) {
+        let scratch = Scratch::new("background-again");
+        let vocabulary = shared(&scratch);
+        vocabulary.borrow_mut().learn_sentence("Ferns grow slowly");
+        save_in_background(&vocabulary, cx);
+        vocabulary.borrow_mut().learn_sentence("Mosses grow faster");
+        save_in_background(&vocabulary, cx);
+        vocabulary
+            .borrow_mut()
+            .learn_sentence("Lichens grow nowhere");
+        save_in_background(&vocabulary, cx);
+        cx.run_until_parked();
+
+        assert_eq!(vocabulary.borrow().background_saves, 2);
+        let all = [
+            "Ferns grow slowly",
+            "Mosses grow faster",
+            "Lichens grow nowhere",
+        ];
+        assert_eq!(saved(&scratch), learned_from(all));
+        assert!(!vocabulary.borrow().dirty);
+    }
+
+    /// A background save that finds the file gone asks for the whole
+    /// vocabulary, and the save after it writes it.
+    #[gpui_kit::test]
+    fn a_background_save_writes_the_whole_vocabulary_over_a_gone_file(cx: &mut TestAppContext) {
+        let scratch = Scratch::new("background-gone");
+        let vocabulary = shared(&scratch);
+        vocabulary.borrow_mut().learn_sentence("Ferns grow slowly");
+        vocabulary.borrow_mut().save();
+        std::fs::remove_file(scratch.file()).unwrap();
+        vocabulary.borrow_mut().learn_sentence("Mosses grow faster");
+        save_in_background(&vocabulary, cx);
+        cx.run_until_parked();
+
+        assert_eq!(vocabulary.borrow().background_saves, 2);
+        let both = ["Ferns grow slowly", "Mosses grow faster"];
+        assert_eq!(saved(&scratch), learned_from(both));
+        assert_eq!(held(&vocabulary), learned_from(both));
+        assert!(!vocabulary.borrow().needs_whole);
+    }
+
+    /// A save on the UI thread, as at quitting, waits for a background save
+    /// under way, so its learning counts once.
+    #[test]
+    fn a_save_at_quit_waits_for_a_background_save() {
+        let scratch = Scratch::new("quit-during-save");
+        let mut vocabulary = scratch.load();
+        vocabulary.learn_sentence("Ferns grow slowly");
+        let save = vocabulary.begin_background_save().unwrap();
+        let running = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            save.run();
+        });
+        vocabulary.learn_sentence("Mosses grow faster");
+        vocabulary.save();
+        running.join().unwrap();
+        let both = ["Ferns grow slowly", "Mosses grow faster"];
+        assert_eq!(saved(&scratch), learned_from(both));
+        assert!(!vocabulary.dirty);
+    }
+
+    /// A background save that never ran, its task dropped before it started,
+    /// puts its learning back.
+    #[test]
+    fn a_background_save_that_never_ran_keeps_its_learning() {
+        let scratch = Scratch::new("never-ran");
+        let mut vocabulary = scratch.load();
+        vocabulary.learn_sentence("Ferns grow slowly");
+        drop(vocabulary.begin_background_save().unwrap());
+        vocabulary.learn_sentence("Mosses grow faster");
+        vocabulary.save();
+        let both = ["Ferns grow slowly", "Mosses grow faster"];
+        assert_eq!(saved(&scratch), learned_from(both));
     }
 
     /// The environment variable that makes [`jot_process`] run: the file,
