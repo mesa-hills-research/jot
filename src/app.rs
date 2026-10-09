@@ -7,7 +7,7 @@ use crate::state::{AppEvent, AppState};
 use gpui_kit::component::{
     ActiveTheme, WindowExt,
     button::{Button, ButtonVariants},
-    dialog::{DialogAction, DialogClose, DialogFooter},
+    dialog::DialogFooter,
     input::{self, Input, InputState},
     v_flex,
 };
@@ -85,8 +85,19 @@ impl JotApp {
         });
 
         window.open_dialog(cx, move |dialog, _, _| {
-            let app_state_go = app_state.clone();
-            let input_go = goto_line_input.clone();
+            let go = {
+                let app_state = app_state.clone();
+                let input = goto_line_input.clone();
+                move |window: &mut Window, cx: &mut App| {
+                    let line_str = input.read(cx).value().to_string();
+                    if let Ok(line) = line_str.trim().parse::<usize>() {
+                        app_state.update(cx, |state, cx| {
+                            state.goto_line(line, window, cx);
+                        });
+                    }
+                }
+            };
+            let go_on_click = go.clone();
 
             dialog
                 .title("Go to Line")
@@ -94,21 +105,26 @@ impl JotApp {
                 .footer(
                     DialogFooter::new()
                         .child(
-                            DialogClose::new()
-                                .child(Button::new("cancel").outline().label("Cancel")),
+                            Button::new("cancel")
+                                .outline()
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
-                        .child(DialogAction::new().child(Button::new("ok").primary().label("OK"))),
+                        .child(Button::new("ok").primary().label("OK").on_click(
+                            move |_, window, cx| {
+                                window.close_dialog(cx);
+                                go_on_click(window, cx);
+                            },
+                        )),
                 )
+                // Enter in the line number field.
                 .on_ok(move |_, window, cx| {
-                    let line_str = input_go.read(cx).value().to_string();
-                    if let Ok(line) = line_str.trim().parse::<usize>() {
-                        app_state_go.update(cx, |state, cx| {
-                            state.goto_line(line, window, cx);
-                        });
-                    }
+                    go(window, cx);
                     true
                 })
         });
+        self.goto_line_input
+            .update(cx, |state, cx| state.focus(window, cx));
     }
 
     fn trigger_open_file(window: &Window, app_state: Entity<AppState>, cx: &App) {
