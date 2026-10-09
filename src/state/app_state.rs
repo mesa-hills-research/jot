@@ -1,6 +1,6 @@
 use super::{Document, EditorOptions, Settings};
 use crate::actions::*;
-use crate::autocomplete::SharedVocabulary;
+use crate::autocomplete::{AutocompleteMode, SharedVocabulary, SuggestionPacing};
 use crate::components::View;
 use crate::fonts::{self, DEFAULT_EDITOR_FONT};
 use gpui_kit::component::WindowExt;
@@ -10,7 +10,7 @@ use gpui_kit::{
     App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     ParentElement, SharedString, Subscription, Window,
 };
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -30,7 +30,9 @@ pub struct AppState {
     pub documents: Vec<Entity<Document>>,
     pub active_index: usize,
     pub settings: Settings,
-    pub autocomplete_enabled: Rc<Cell<bool>>,
+    /// The word suggestions' mode, and how the user has been answering them
+    /// this session.
+    pub suggestion_pacing: Rc<SuggestionPacing>,
     pub shared_vocabulary: Rc<RefCell<SharedVocabulary>>,
     untitled_counter: u32,
     pub focus_handle: FocusHandle,
@@ -51,14 +53,14 @@ impl AppState {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         let settings = Settings::load();
-        let autocomplete_enabled = Rc::new(Cell::new(settings.autocomplete));
+        let suggestion_pacing = Rc::new(SuggestionPacing::new(settings.autocomplete));
         let shared_vocabulary = Rc::new(RefCell::new(SharedVocabulary::load()));
 
         Self {
             documents: Vec::new(),
             active_index: 0,
             settings,
-            autocomplete_enabled,
+            suggestion_pacing,
             shared_vocabulary,
             untitled_counter: 1,
             focus_handle,
@@ -90,7 +92,7 @@ impl AppState {
             keymap: self.settings.keymap,
             smooth_caret: self.settings.smooth_caret,
             shared_vocab: self.shared_vocabulary.clone(),
-            autocomplete_enabled: self.autocomplete_enabled.clone(),
+            suggestion_pacing: self.suggestion_pacing.clone(),
         }
     }
 
@@ -163,10 +165,11 @@ impl AppState {
         self.settings_changed(cx);
     }
 
-    /// Turns the inline word suggestions on or off.
-    pub fn set_autocomplete(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.settings.autocomplete = enabled;
-        self.autocomplete_enabled.set(enabled);
+    /// Sets how eagerly every document offers word suggestions, from its
+    /// next keystroke.
+    pub fn set_autocomplete(&mut self, mode: AutocompleteMode, cx: &mut Context<Self>) {
+        self.settings.autocomplete = mode;
+        self.suggestion_pacing.set_mode(mode);
         self.settings.save();
         cx.notify();
     }

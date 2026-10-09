@@ -1,3 +1,4 @@
+use crate::autocomplete::AutocompleteMode;
 use crate::fonts;
 use crate::state::{AppState, ZOOM_LEVELS};
 use gpui_kit::component::{
@@ -24,6 +25,13 @@ const KEYMAPS: [(Keymap, &str); 3] = [
     (Keymap::Cua, "Standard"),
     (Keymap::Emacs, "Emacs"),
     (Keymap::Vim, "Vim"),
+];
+
+/// How eagerly word suggestions show, as the settings page names them.
+const AUTOCOMPLETE_MODES: [(AutocompleteMode, &str); 3] = [
+    (AutocompleteMode::Off, "Off"),
+    (AutocompleteMode::Quiet, "Quiet"),
+    (AutocompleteMode::Eager, "Eager"),
 ];
 
 /// How wide the page's column of settings grows.
@@ -218,30 +226,37 @@ impl SettingsPanel {
             })
     }
 
-    fn keymap_toggles(&self, current: Keymap) -> impl IntoElement {
-        let current = KEYMAPS
+    /// Side-by-side buttons that choose one of `choices` with `set`.
+    fn segmented<T: Copy + PartialEq + 'static>(
+        &self,
+        id: &'static str,
+        choices: &'static [(T, &'static str)],
+        current: T,
+        set: fn(&mut AppState, T, &mut Context<AppState>),
+    ) -> impl IntoElement {
+        let current = choices
             .iter()
-            .position(|(keymap, _)| *keymap == current)
+            .position(|(choice, _)| *choice == current)
             .unwrap_or_default();
         let app_state = self.app_state.clone();
-        ToggleGroup::new("keymap")
+        ToggleGroup::new(id)
             .segmented()
             .outline()
             .children(
-                KEYMAPS
+                choices
                     .iter()
                     .enumerate()
                     .map(|(ix, (_, label))| Toggle::new(ix).label(*label).checked(ix == current)),
             )
             .on_click(move |checked: &Vec<bool>, _, cx| {
-                // One scheme is always chosen: clicking the chosen one keeps it.
+                // One is always chosen: clicking the chosen one keeps it.
                 let chosen = checked
                     .iter()
                     .enumerate()
                     .find(|(ix, on)| **on && *ix != current)
-                    .and_then(|(ix, _)| KEYMAPS.get(ix));
-                if let Some((keymap, _)) = chosen {
-                    app_state.update(cx, |state, cx| state.set_keymap(*keymap, cx));
+                    .and_then(|(ix, _)| choices.get(ix));
+                if let Some((choice, _)) = chosen {
+                    app_state.update(cx, |state, cx| set(state, *choice, cx));
                 }
             })
     }
@@ -440,13 +455,10 @@ impl Render for SettingsPanel {
                 ),
                 row(
                     "Word suggestions",
-                    Some(
-                        "Offers the rest of a word as you type, learned from your writing. \
-                         Tab accepts it.",
-                    ),
-                    self.switch(
+                    Some("Tab finishes a word from your writing. Quiet waits until you pause."),
+                    self.segmented(
                         "autocomplete",
-                        "Word suggestions",
+                        &AUTOCOMPLETE_MODES,
                         settings.autocomplete,
                         AppState::set_autocomplete,
                     ),
@@ -472,7 +484,7 @@ impl Render for SettingsPanel {
             vec![row(
                 "Keybindings",
                 Some("The keys for moving around and editing a document."),
-                self.keymap_toggles(settings.keymap),
+                self.segmented("keymap", &KEYMAPS, settings.keymap, AppState::set_keymap),
                 cx,
             )],
             cx,

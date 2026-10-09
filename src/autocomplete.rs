@@ -49,13 +49,26 @@
 //! When a dictionary is available, words that are not dictionary-correct are
 //! only suggested after repeated committed use, so one-off typos do not
 //! surface while genuine jargon can earn trust.
+//!
+//! # Pacing
+//!
+//! When a suggestion shows, as opposed to which one, follows the user's
+//! [`AutocompleteMode`]: in Quiet, the default, after a pause in typing, and
+//! less often for words the user types past. See [`pacing`].
+
+mod pacing;
+
+pub use pacing::{AutocompleteMode, SuggestionPacing};
 
 use crate::spell::Dictionary;
-use gpui_kit::component::input::{Suggestion, SuggestionProvider, SuggestionRequest};
+use gpui_kit::component::input::{
+    Suggestion, SuggestionEvent, SuggestionProvider, SuggestionRequest, TextChange,
+};
 use gpui_kit::{App, Task, Window};
+use pacing::Pacer;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -1674,17 +1687,23 @@ pub struct JotCompletionProvider {
     shared_vocab: Rc<RefCell<SharedVocabulary>>,
     local_index: RefCell<WordIndex>,
     learned_occurrences: RefCell<HashSet<LearnedOccurrence>>,
-    enabled: Rc<Cell<bool>>,
+    pacer: Pacer,
 }
 
 impl JotCompletionProvider {
-    pub fn new(shared_vocab: Rc<RefCell<SharedVocabulary>>, enabled: Rc<Cell<bool>>) -> Self {
+    pub fn new(shared_vocab: Rc<RefCell<SharedVocabulary>>, pacing: Rc<SuggestionPacing>) -> Self {
         Self {
             shared_vocab,
             local_index: RefCell::new(WordIndex::new()),
             learned_occurrences: RefCell::new(HashSet::new()),
-            enabled,
+            pacer: Pacer::new(pacing),
         }
+    }
+
+    /// Hears that the user took a suggestion with Tab or closed it with
+    /// Escape. The document forwards its text editor's events here.
+    pub fn suggestion_event(&self, event: &SuggestionEvent, cx: &App) {
+        self.pacer.event(event, cx.background_executor().now());
     }
 
     /// Learns the most recently committed prose sentence before the cursor.
@@ -1772,9 +1791,9 @@ impl SuggestionProvider for JotCompletionProvider {
         &self,
         request: &SuggestionRequest,
         _window: &mut Window,
-        _cx: &mut App,
+        cx: &mut App,
     ) -> Task<anyhow::Result<Vec<Suggestion>>> {
-        if !self.enabled.get() {
+        if self.pacer.mode() == AutocompleteMode::Off {
             return Task::ready(Ok(Vec::new()));
         }
 
@@ -1794,22 +1813,45 @@ impl SuggestionProvider for JotCompletionProvider {
 
             generate_suggestion(&shared, &local, &text, offset)
         };
+        let now = cx.background_executor().now();
+        let suggestion = self.pacer.offer(&text, offset, suggestion, now);
 
         Task::ready(Ok(suggestion.into_iter().map(Suggestion::new).collect()))
     }
 
-    fn is_trigger(&self, _offset: usize, text: &str, _cx: &mut App) -> bool {
-        if !self.enabled.get() {
-            return false;
-        }
+    fn is_trigger(&self, offset: usize, text: &str, cx: &mut App) -> bool {
+        let triggers = self.pacer.mode() != AutocompleteMode::Off
+            && text.chars().any(|character| {
+                character.is_alphanumeric()
+                    || character == '_'
+                    || character == '-'
+                    || character == ' '
+                    || is_sentence_terminator(character)
+            });
+        self.pacer
+            .typed(offset, text, triggers, cx.background_executor().now());
+        triggers
+    }
 
-        text.chars().any(|character| {
-            character.is_alphanumeric()
-                || character == '_'
-                || character == '-'
-                || character == ' '
-                || is_sentence_terminator(character)
-        })
+    /// Quiet waits for typing to pause, longer after ignored suggestions,
+    /// but not while the user types along the suggestion on screen. Eager
+    /// never waits.
+    fn debounce(&self) -> Duration {
+        self.pacer.debounce()
+    }
+
+    /// A request learns the sentence before the caret, and Eager makes one
+    /// after every keystroke that triggers. Quiet makes one only once typing
+    /// pauses, so it learns after those keystrokes here instead. It learns
+    /// what Eager would, and at the same moments: after a typed key, never
+    /// at a paste, an undo or another edit the user didn't type.
+    fn did_change(&self, change: &TextChange, cx: &mut App) {
+        let now = cx.background_executor().now();
+        if let Some(caret) = self.pacer.changed(change, now) {
+            let text = change.text().to_string();
+            let caret = floor_char_boundary(&text, caret.min(text.len()));
+            self.learn_preceding_sentence(&text, caret);
+        }
     }
 }
 

@@ -5,7 +5,8 @@ macOS and Linux. It fills the space between a simple editor like Notepad and a w
 your files stay plain text, and jot helps you write them.
 
 - Spell checking as you type, with suggestions and Add to Dictionary
-- Word completion that learns from your own writing, stored on your computer
+- Word completion that learns from your own writing, stored on your computer, and by default
+  waits until you pause
 - Tabs, find and replace, Go to Line, word wrap, line numbers and zoom
 - An optional smooth caret that glides as you type and move around
 - Light and dark color themes
