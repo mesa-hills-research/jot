@@ -441,8 +441,8 @@ fn typing_sentences_learns_them(cx: &mut TestAppContext) {
     );
 }
 
-/// A paste teaches nothing. The next typed key learns the sentence before
-/// the caret, as a request always has, pasted or not.
+/// A paste teaches nothing, neither when the user types after it nor when
+/// they finish a pasted sentence. What they type below it is learned.
 #[gpui_kit::test]
 fn a_paste_learns_nothing(cx: &mut TestAppContext) {
     let learned = learned_in_both_modes(cx, |jot| {
@@ -452,22 +452,69 @@ fn a_paste_learns_nothing(cx: &mut TestAppContext) {
             "Ferns grow slowly.\nMosses grow faster. Lichens wait"
         );
         assert_eq!(learned(jot), []);
-        jot.type_text(" patiently");
-        assert_eq!(
-            learned(jot),
-            counts(&[("Mosses", 1), ("faster", 1), ("grow", 1)])
-        );
+        jot.type_text(" patiently. Then");
     });
-    assert_eq!(learned.len(), 3);
+    assert_eq!(learned, []);
 
-    // A typed terminator learns the pasted words before it.
     let learned = learned_in_both_modes(cx, |jot| {
         paste(jot, "Lichens wait patiently");
         jot.type_text(".");
+        paste(jot, " Ferns grow slowly.\n");
+        jot.type_text("Mosses grow faster. Then");
     });
     assert_eq!(
         learned,
-        counts(&[("Lichens", 1), ("patiently", 1), ("wait", 1)])
+        counts(&[("Mosses", 1), ("faster", 1), ("grow", 1)])
+    );
+
+    // Typing inside pasted text doesn't make it the user's.
+    let learned = learned_in_both_modes(cx, |jot| {
+        paste(jot, "Alpha beta gamma. Delta epsilon zeta.");
+        jot.cx.simulate_keystrokes("left");
+        jot.type_text(" eta");
+        jot.cx.simulate_keystrokes("end");
+        jot.type_text(" Theta");
+    });
+    assert_eq!(learned, []);
+}
+
+/// A line is learned once the user moves on from it, after a blank line
+/// too, as is the last item of a list before one.
+#[gpui_kit::test]
+fn a_line_before_a_blank_line_is_learned(cx: &mut TestAppContext) {
+    let learned = learned_in_both_modes(cx, |jot| {
+        jot.type_text("Let me know what you think");
+        jot.cx.simulate_keystrokes("enter enter");
+        jot.type_text("Sounds");
+    });
+    assert_eq!(
+        learned,
+        counts(&[
+            ("Let", 1),
+            ("know", 1),
+            ("me", 1),
+            ("think", 1),
+            ("what", 1),
+            ("you", 1)
+        ])
+    );
+
+    let learned = learned_in_both_modes(cx, |jot| {
+        jot.type_text("- buy milk");
+        jot.cx.simulate_keystrokes("enter");
+        jot.type_text("- call the bank");
+        jot.cx.simulate_keystrokes("enter enter");
+        jot.type_text("Next");
+    });
+    assert_eq!(
+        learned,
+        counts(&[
+            ("bank", 1),
+            ("buy", 1),
+            ("call", 1),
+            ("milk", 1),
+            ("the", 1)
+        ])
     );
 }
 

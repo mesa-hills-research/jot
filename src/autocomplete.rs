@@ -32,9 +32,11 @@
 //! # Learning
 //!
 //! The persistent vocabulary learns only from typed text. A sentence is
-//! learned when a terminator is committed after it, deduplicated by sentence
-//! occurrence rather than content alone, and skipped when its context
-//! classifies as code.
+//! learned at the first typed key after its terminator, a line break
+//! included, so a line ended by a blank line counts. It is skipped when any
+//! of it was pasted, undone or redone, or inserted by the program rather than
+//! typed (see [`typed`]), and when its context classifies as code. Learning is
+//! deduplicated by sentence occurrence rather than content alone.
 //!
 //! One-character English words `a`, `A`, and `I` are preserved. Other
 //! rejected tokens break the n-gram sequence so words on either side never
@@ -57,6 +59,7 @@
 //! less often for words the user types past. See [`pacing`].
 
 mod pacing;
+mod typed;
 
 pub use pacing::{AutocompleteMode, SuggestionPacing};
 
@@ -73,9 +76,11 @@ use std::cmp::Ordering;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+use typed::TypedText;
 
 /// Current persisted model schema and tokenization version.
 const MODEL_VERSION: u32 = 2;
@@ -1687,6 +1692,7 @@ pub struct JotCompletionProvider {
     shared_vocab: Rc<RefCell<SharedVocabulary>>,
     local_index: RefCell<WordIndex>,
     learned_occurrences: RefCell<HashSet<LearnedOccurrence>>,
+    typed: RefCell<TypedText>,
     pacer: Pacer,
 }
 
@@ -1696,6 +1702,7 @@ impl JotCompletionProvider {
             shared_vocab,
             local_index: RefCell::new(WordIndex::new()),
             learned_occurrences: RefCell::new(HashSet::new()),
+            typed: RefCell::new(TypedText::default()),
             pacer: Pacer::new(pacing),
         }
     }
@@ -1706,36 +1713,13 @@ impl JotCompletionProvider {
         self.pacer.event(event, cx.background_executor().now());
     }
 
-    /// Learns the most recently committed prose sentence before the cursor.
+    /// Learns the most recently finished prose sentence before the cursor,
+    /// when the user typed all of it.
     fn learn_preceding_sentence(&self, text: &str, offset: usize) {
-        let search_floor =
-            floor_char_boundary(text, offset.saturating_sub(TERMINATOR_SEARCH_BYTES));
-
-        let search_window = &text[search_floor..offset];
-
-        let Some(relative_terminator) =
-            search_window.rfind(|character: char| is_sentence_terminator(character))
-        else {
+        let Some((range, terminator_offset)) = preceding_sentence(text, offset) else {
             return;
         };
-
-        let terminator_offset = search_floor + relative_terminator;
-
-        let inner_floor =
-            floor_char_boundary(text, terminator_offset.saturating_sub(SENTENCE_SCAN_BYTES));
-
-        let inner = &text[inner_floor..terminator_offset];
-
-        let relative_start = inner
-            .rfind(|character: char| is_sentence_terminator(character))
-            .map(|index| index + 1)
-            .unwrap_or(0);
-
-        let sentence = inner[relative_start..].trim();
-
-        if sentence.is_empty() {
-            return;
-        }
+        let sentence = &text[range.clone()];
 
         let sentence_hash = hash_str(sentence);
         let occurrence = LearnedOccurrence {
@@ -1744,6 +1728,10 @@ impl JotCompletionProvider {
         };
 
         if self.learned_occurrences.borrow().contains(&occurrence) {
+            return;
+        }
+
+        if self.typed.borrow().overlaps_untyped(range) {
             return;
         }
 
@@ -1784,6 +1772,31 @@ impl JotCompletionProvider {
     }
 }
 
+/// The last finished sentence before `offset`, as its trimmed byte range and
+/// the offset of the terminator after it.
+///
+/// A sentence ends at a terminator: `.`, `!`, `?` or a line break. Empty
+/// stretches between terminators are passed over, so the line before a blank
+/// line counts as finished.
+fn preceding_sentence(text: &str, offset: usize) -> Option<(Range<usize>, usize)> {
+    let search_floor = floor_char_boundary(text, offset.saturating_sub(TERMINATOR_SEARCH_BYTES));
+    let mut end = offset;
+    loop {
+        let terminator = search_floor + text[search_floor..end].rfind(is_sentence_terminator)?;
+        let scan_floor = floor_char_boundary(text, terminator.saturating_sub(SENTENCE_SCAN_BYTES));
+        let start = text[scan_floor..terminator]
+            .rfind(is_sentence_terminator)
+            .map_or(scan_floor, |index| scan_floor + index + 1);
+        let segment = &text[start..terminator];
+        let sentence = segment.trim();
+        if !sentence.is_empty() {
+            let sentence_start = start + segment.len() - segment.trim_start().len();
+            return Some((sentence_start..sentence_start + sentence.len(), terminator));
+        }
+        end = terminator;
+    }
+}
+
 /// Offers one word, or a short run of words, to continue the text at the
 /// caret. The text editor shows it as ghost text that Tab accepts.
 impl SuggestionProvider for JotCompletionProvider {
@@ -1815,11 +1828,15 @@ impl SuggestionProvider for JotCompletionProvider {
         };
         let now = cx.background_executor().now();
         let suggestion = self.pacer.offer(&text, offset, suggestion, now);
+        self.typed
+            .borrow_mut()
+            .offered(offset, suggestion.as_deref());
 
         Task::ready(Ok(suggestion.into_iter().map(Suggestion::new).collect()))
     }
 
     fn is_trigger(&self, offset: usize, text: &str, cx: &mut App) -> bool {
+        self.typed.borrow_mut().typed(offset, text);
         let triggers = self.pacer.mode() != AutocompleteMode::Off
             && text.chars().any(|character| {
                 character.is_alphanumeric()
@@ -1840,12 +1857,15 @@ impl SuggestionProvider for JotCompletionProvider {
         self.pacer.debounce()
     }
 
+    /// Notes which inserted text the user didn't type, in every mode.
+    ///
     /// A request learns the sentence before the caret, and Eager makes one
     /// after every keystroke that triggers. Quiet makes one only once typing
     /// pauses, so it learns after those keystrokes here instead. It learns
     /// what Eager would, and at the same moments: after a typed key, never
     /// at a paste, an undo or another edit the user didn't type.
     fn did_change(&self, change: &TextChange, cx: &mut App) {
+        self.typed.borrow_mut().changed(change);
         let now = cx.background_executor().now();
         if let Some(caret) = self.pacer.changed(change, now) {
             let text = change.text().to_string();
