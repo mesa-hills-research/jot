@@ -339,6 +339,7 @@ trait Lexicon {
             .unwrap_or(0)
     }
 
+    #[allow(dead_code)]
     fn bigram_count(&self, w1: &str, w2: &str) -> u32 {
         let successor = canonical_prediction_word(w2);
         self.bigram_successors(w1)
@@ -347,6 +348,7 @@ trait Lexicon {
             .unwrap_or(0)
     }
 
+    #[allow(dead_code)]
     fn trigram_count(&self, w1: &str, w2: &str, w3: &str) -> u32 {
         let successor = canonical_prediction_word(w3);
         self.trigram_successors(w1, w2)
@@ -427,10 +429,8 @@ impl SharedVocabulary {
         vocabulary.store = store;
         vocabulary.dirty = migrated;
 
-        if !migrated {
-            if let Ok(metadata) = std::fs::metadata(&path) {
-                vocabulary.frozen = metadata.len() >= VOCAB_MAX_BYTES;
-            }
+        if !migrated && let Ok(metadata) = std::fs::metadata(&path) {
+            vocabulary.frozen = metadata.len() >= VOCAB_MAX_BYTES;
         }
 
         vocabulary
@@ -571,10 +571,10 @@ impl WordIndex {
 
     /// Rebuilds the local index when its throttle interval has elapsed.
     fn rebuild_if_stale(&mut self, text: &str, cursor: usize) {
-        if let Some(last_rebuild) = self.last_rebuild {
-            if last_rebuild.elapsed() < LOCAL_REBUILD_INTERVAL {
-                return;
-            }
+        if let Some(last_rebuild) = self.last_rebuild
+            && last_rebuild.elapsed() < LOCAL_REBUILD_INTERVAL
+        {
+            return;
         }
 
         self.last_rebuild = Some(Instant::now());
@@ -670,8 +670,7 @@ fn is_learnable_word(word: &str) -> bool {
         return matches!(word, "a" | "A" | "I");
     }
 
-    character_count >= MIN_WORD_LEN
-        && character_count <= MAX_WORD_LEN
+    (MIN_WORD_LEN..=MAX_WORD_LEN).contains(&character_count)
         && word.chars().any(|character| character.is_alphabetic())
 }
 
@@ -846,15 +845,15 @@ fn number_preference(prev: Option<&str>, prev2: Option<&str>) -> NumberPreferenc
         }
     }
 
-    if let (Some(intervening), Some(determiner)) = (prev, prev2) {
-        if !breaks_determiner_scope(intervening) {
-            if is_singular_determiner(determiner) {
-                return NumberPreference::Singular;
-            }
+    if let (Some(intervening), Some(determiner)) = (prev, prev2)
+        && !breaks_determiner_scope(intervening)
+    {
+        if is_singular_determiner(determiner) {
+            return NumberPreference::Singular;
+        }
 
-            if is_plural_determiner(determiner) {
-                return NumberPreference::Plural;
-            }
+        if is_plural_determiner(determiner) {
+            return NumberPreference::Plural;
         }
     }
 
@@ -1427,15 +1426,14 @@ fn follow_stats(
     prior: Option<&str>,
     current: &str,
 ) -> Option<(String, u32, u32)> {
-    if let Some(prior) = prior {
-        if let Some(stats) = merged_best(
+    if let Some(prior) = prior
+        && let Some(stats) = merged_best(
             shared.trigram_successors(prior, current),
             local.trigram_successors(prior, current),
-        ) {
-            if stats.1 >= EXTEND_MIN_COUNT {
-                return Some(stats);
-            }
-        }
+        )
+        && stats.1 >= EXTEND_MIN_COUNT
+    {
+        return Some(stats);
     }
 
     merged_best(
@@ -1462,19 +1460,19 @@ fn predict_next_word(
     previous: &str,
     previous_two: Option<&str>,
 ) -> Option<String> {
-    if let Some(previous_two) = previous_two {
-        if let Some((word, count, total)) = merged_best(
+    if let Some(previous_two) = previous_two
+        && let Some((word, count, total)) = merged_best(
             shared.trigram_successors(previous_two, previous),
             local.trigram_successors(previous_two, previous),
-        ) {
-            let probability = count as f64 / total as f64;
+        )
+    {
+        let probability = count as f64 / total as f64;
 
-            if count >= PREDICT_TRIGRAM_MIN_COUNT
-                && probability >= PREDICT_TRIGRAM_MIN_PROB
-                && valid_prediction(shared, local, previous, &word)
-            {
-                return Some(word);
-            }
+        if count >= PREDICT_TRIGRAM_MIN_COUNT
+            && probability >= PREDICT_TRIGRAM_MIN_PROB
+            && valid_prediction(shared, local, previous, &word)
+        {
+            return Some(word);
         }
     }
 

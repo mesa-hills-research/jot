@@ -6,15 +6,18 @@ use gpui_kit::{
 };
 use std::rc::Rc;
 
+type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+type MouseDownHandler = Rc<dyn Fn(&MouseDownEvent, &mut Window, &mut App)>;
+
 #[derive(IntoElement)]
 pub struct JotTab {
     id: ElementId,
     title: SharedString,
     dirty: bool,
     selected: bool,
-    on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
-    on_close: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
-    on_middle_click: Option<Rc<dyn Fn(&MouseDownEvent, &mut Window, &mut App)>>,
+    on_click: Option<ClickHandler>,
+    on_close: Option<ClickHandler>,
+    on_middle_click: Option<MouseDownHandler>,
 }
 
 impl JotTab {

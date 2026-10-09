@@ -28,7 +28,7 @@ pub struct JotApp {
 
 impl JotApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let app_state = cx.new(|cx| AppState::new(cx));
+        let app_state = cx.new(AppState::new);
 
         window.on_window_should_close(cx, chrome::can_close);
 
@@ -64,18 +64,15 @@ impl JotApp {
     }
 
     fn handle_app_event(&mut self, event: &AppEvent, window: &mut Window, cx: &mut Context<Self>) {
-        match event {
-            AppEvent::SettingsChanged => {
-                self.app_state.update(cx, |state, cx| {
-                    state.apply_settings_to_all_docs(window, cx);
-                });
-                // The View menu shows Word Wrap and Line Numbers.
-                let settings = self.app_state.read(cx).settings.clone();
-                set_menus(&settings, cx);
-                self.title_bar
-                    .update(cx, |title_bar, cx| title_bar.reload_menus(cx));
-            }
-            _ => {}
+        if let AppEvent::SettingsChanged = event {
+            self.app_state.update(cx, |state, cx| {
+                state.apply_settings_to_all_docs(window, cx);
+            });
+            // The View menu shows Word Wrap and Line Numbers.
+            let settings = self.app_state.read(cx).settings.clone();
+            set_menus(&settings, cx);
+            self.title_bar
+                .update(cx, |title_bar, cx| title_bar.reload_menus(cx));
         }
     }
 

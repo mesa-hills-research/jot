@@ -16,12 +16,12 @@ pub fn find_themes_dir() -> Option<PathBuf> {
         return Some(up_two);
     }
 
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            let exe_themes = exe_dir.join("themes");
-            if exe_themes.exists() {
-                return Some(exe_themes);
-            }
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(exe_dir) = exe_path.parent()
+    {
+        let exe_themes = exe_dir.join("themes");
+        if exe_themes.exists() {
+            return Some(exe_themes);
         }
     }
 

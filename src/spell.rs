@@ -106,10 +106,10 @@ impl Dictionary {
     pub fn load_default() -> Self {
         let mut words: HashSet<Box<str>> = HashSet::new();
 
-        if let Ok(Some(data)) = Assets.load("dict/en.txt") {
-            if let Ok(content) = std::str::from_utf8(&data) {
-                Self::insert_wordlist(content, &mut words);
-            }
+        if let Ok(Some(data)) = Assets.load("dict/en.txt")
+            && let Ok(content) = std::str::from_utf8(&data)
+        {
+            Self::insert_wordlist(content, &mut words);
         }
 
         for path in Self::wordlist_paths() {
@@ -319,7 +319,9 @@ impl Dictionary {
         let target_is_lowercase = word.chars().all(|c| !c.is_uppercase());
 
         let words = self.words.borrow();
-        let mut matches: Vec<((usize, u8, u8, usize), &str)> = Vec::new();
+        // (edit distance, first letter differs, case differs, length difference)
+        type RankKey = (usize, u8, u8, usize);
+        let mut matches: Vec<(RankKey, &str)> = Vec::new();
         for cand in words.iter() {
             let cand_len = cand.chars().count();
             let len_diff = cand_len.abs_diff(target.len());
@@ -425,13 +427,13 @@ impl SpellScanner {
         for line in text.iter_lines() {
             let content = line.to_string();
             let hash = hash_line(&content);
-            if !new_cache.contains_key(&hash) {
+            if let std::collections::hash_map::Entry::Vacant(e) = new_cache.entry(hash) {
                 let entry = self.cache.remove(&hash).unwrap_or_else(|| CachedLine {
                     code_score: line_code_score(&content),
                     is_fence: content.trim_start().starts_with("```"),
                     misspellings: None,
                 });
-                new_cache.insert(hash, entry);
+                e.insert(entry);
             }
             let entry = &new_cache[&hash];
             rows.push(LineRecord {
@@ -563,7 +565,7 @@ fn examine_token(
         end -= 1;
     }
     let len = end - start;
-    if len < MIN_CHECK_TOKEN_CHARS || len > MAX_CHECK_TOKEN_CHARS {
+    if !(MIN_CHECK_TOKEN_CHARS..=MAX_CHECK_TOKEN_CHARS).contains(&len) {
         return;
     }
 
@@ -594,15 +596,14 @@ fn examine_token(
     let next = chars.get(raw_end).map(|&(_, c)| c);
     let next2 = chars.get(raw_end + 1).map(|&(_, c)| c);
 
-    if let Some(p) = prev {
-        if p.is_ascii_digit()
+    if let Some(p) = prev
+        && (p.is_ascii_digit()
             || matches!(
                 p,
                 '_' | '.' | '@' | '/' | '\\' | '#' | '$' | '&' | '=' | '~' | '`' | '<' | ':'
-            )
-        {
-            return;
-        }
+            ))
+    {
+        return;
     }
     if let Some(n) = next {
         if n.is_ascii_digit() || matches!(n, '_' | '@' | '(' | '=' | '`' | '>' | '/' | '\\') {
@@ -623,10 +624,9 @@ fn examine_token(
     if let Some(base) = word
         .strip_suffix("'s")
         .or_else(|| word.strip_suffix("\u{2019}s"))
+        && dictionary.is_correct(base)
     {
-        if dictionary.is_correct(base) {
-            return;
-        }
+        return;
     }
     if has_upper && !starts_sentence(chars, raw_start) {
         return;

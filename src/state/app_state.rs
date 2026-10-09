@@ -10,9 +10,11 @@ use gpui_kit::{
     Subscription, Window,
 };
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+// Subscribers read only some of the indices.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum AppEvent {
     TabAdded(usize),
@@ -232,7 +234,7 @@ impl AppState {
         cx.notify();
     }
 
-    fn show_utf8_error(&self, path: &PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    fn show_utf8_error(&self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let filename = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())

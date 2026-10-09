@@ -8,10 +8,8 @@ use gpui_kit::{AppContext, Context, Entity, SharedString, Subscription, Task, Wi
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
-use uuid::Uuid;
 
 pub struct Document {
-    pub id: Uuid,
     pub path: Option<PathBuf>,
     pub title: SharedString,
     pub dirty: bool,
@@ -27,6 +25,7 @@ pub struct Document {
 }
 
 impl Document {
+    #[allow(clippy::too_many_arguments)]
     pub fn new_untitled(
         number: Option<u32>,
         word_wrap: bool,
@@ -56,7 +55,6 @@ impl Document {
         let subscriptions = vec![Self::observe_editor(&editor_state, cx)];
 
         let mut doc = Self {
-            id: Uuid::new_v4(),
             path: None,
             title,
             dirty: false,
@@ -73,6 +71,7 @@ impl Document {
         doc
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_path(
         path: PathBuf,
         content: String,
@@ -106,7 +105,6 @@ impl Document {
         let subscriptions = vec![Self::observe_editor(&editor_state, cx)];
 
         let mut doc = Self {
-            id: Uuid::new_v4(),
             path: Some(path),
             title,
             dirty: false,
@@ -123,6 +121,7 @@ impl Document {
         doc
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_template(
         content: String,
         number: Option<u32>,
@@ -155,7 +154,6 @@ impl Document {
         let subscriptions = vec![Self::observe_editor(&editor_state, cx)];
 
         let mut doc = Self {
-            id: Uuid::new_v4(),
             path: None,
             title,
             dirty: has_content,

@@ -44,24 +44,24 @@ fn main() {
 }
 
 fn load_fonts(cx: &mut App) {
-    if let Ok(Some(work_sans)) = Assets.load("fonts/WorkSans-Regular.ttf") {
-        if let Err(e) = cx.text_system().add_fonts(vec![work_sans]) {
-            log::error!("Failed to load Work Sans font: {}", e);
-        }
+    if let Ok(Some(work_sans)) = Assets.load("fonts/WorkSans-Regular.ttf")
+        && let Err(e) = cx.text_system().add_fonts(vec![work_sans])
+    {
+        log::error!("Failed to load Work Sans font: {}", e);
     }
 
-    if let Ok(Some(jetbrains)) = Assets.load("fonts/JetBrainsMono-Regular.ttf") {
-        if let Err(e) = cx.text_system().add_fonts(vec![jetbrains]) {
-            log::error!("Failed to load JetBrains Mono font: {}", e);
-        }
+    if let Ok(Some(jetbrains)) = Assets.load("fonts/JetBrainsMono-Regular.ttf")
+        && let Err(e) = cx.text_system().add_fonts(vec![jetbrains])
+    {
+        log::error!("Failed to load JetBrains Mono font: {}", e);
     }
 }
 
 fn load_themes(cx: &mut App, initial_theme: &str) {
     let initial_theme = initial_theme.to_string();
 
-    if let Some(theme_dir) = theme::find_themes_dir() {
-        if let Err(e) = ThemeRegistry::watch_dir(theme_dir, cx, move |cx| {
+    if let Some(theme_dir) = theme::find_themes_dir()
+        && let Err(e) = ThemeRegistry::watch_dir(theme_dir, cx, move |cx| {
             let registry = ThemeRegistry::global(cx);
             let theme_name = if registry.themes().contains_key(initial_theme.as_str()) {
                 initial_theme.as_str()
@@ -72,8 +72,8 @@ fn load_themes(cx: &mut App, initial_theme: &str) {
             if let Some(theme_config) = registry.themes().get(theme_name).cloned() {
                 Theme::global_mut(cx).apply_config(&theme_config);
             }
-        }) {
-            log::error!("Failed to load themes: {}", e);
-        }
+        })
+    {
+        log::error!("Failed to load themes: {}", e);
     }
 }

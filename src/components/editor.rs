@@ -66,7 +66,7 @@ impl Editor {
                 window,
                 move |this, editor_state, event, window, cx| {
                     if let InputEvent::Change = event {
-                        this.handle_text_change(&editor_state, &app_state, window, cx);
+                        this.handle_text_change(editor_state, &app_state, window, cx);
                     }
                 },
             ));

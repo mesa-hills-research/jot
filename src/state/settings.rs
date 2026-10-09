@@ -71,18 +71,18 @@ impl Settings {
     }
 
     pub fn zoom_in(&mut self) {
-        if let Some(pos) = ZOOM_LEVELS.iter().position(|&z| z == self.zoom_level) {
-            if pos + 1 < ZOOM_LEVELS.len() {
-                self.zoom_level = ZOOM_LEVELS[pos + 1];
-            }
+        if let Some(pos) = ZOOM_LEVELS.iter().position(|&z| z == self.zoom_level)
+            && pos + 1 < ZOOM_LEVELS.len()
+        {
+            self.zoom_level = ZOOM_LEVELS[pos + 1];
         }
     }
 
     pub fn zoom_out(&mut self) {
-        if let Some(pos) = ZOOM_LEVELS.iter().position(|&z| z == self.zoom_level) {
-            if pos > 0 {
-                self.zoom_level = ZOOM_LEVELS[pos - 1];
-            }
+        if let Some(pos) = ZOOM_LEVELS.iter().position(|&z| z == self.zoom_level)
+            && pos > 0
+        {
+            self.zoom_level = ZOOM_LEVELS[pos - 1];
         }
     }
 
