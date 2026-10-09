@@ -14,7 +14,7 @@ winresource = "0.1"
 [dependencies]
 # GPUI Kit from Mesa Hills Research's fork. It pins the matching gpui-pre release
 # and re-exports it, so GPUI is `gpui_kit::*` and needs no entry of its own.
-gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "299cb906534811084c5705b71cc1ccb829d009ae" }
+gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3" }
 anyhow = "1.0"
 rust-embed = "8.5"
 serde = { version = "1.0", features = ["derive"] }

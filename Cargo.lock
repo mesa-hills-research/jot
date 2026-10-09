@@ -2326,7 +2326,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=299cb906534811084c5705b71cc1ccb829d009ae#299cb906534811084c5705b71cc1ccb829d009ae"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3#65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2366,7 +2366,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=299cb906534811084c5705b71cc1ccb829d009ae#299cb906534811084c5705b71cc1ccb829d009ae"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3#65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2411,7 +2411,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=299cb906534811084c5705b71cc1ccb829d009ae#299cb906534811084c5705b71cc1ccb829d009ae"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3#65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2422,7 +2422,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=299cb906534811084c5705b71cc1ccb829d009ae#299cb906534811084c5705b71cc1ccb829d009ae"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3#65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -2435,7 +2435,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=299cb906534811084c5705b71cc1ccb829d009ae#299cb906534811084c5705b71cc1ccb829d009ae"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3#65c00ad5e15038d9a5fc2ffba8cd406a4b42d3d3"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -6296,7 +6296,7 @@ version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32824fab5e16e6c4d86dc1ba84489390419a39f97699852b66480bb87d297ed8"
 dependencies = [
- "dirs 6.0.0",
+ "dirs 5.0.1",
 ]
 
 [[package]]
@@ -7942,7 +7942,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
