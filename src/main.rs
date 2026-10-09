@@ -57,7 +57,7 @@ fn load_themes(cx: &mut App, initial_theme: &str) {
             };
 
             if let Some(theme_config) = registry.themes().get(theme_name).cloned() {
-                Theme::global_mut(cx).apply_config(&theme_config);
+                Theme::update(cx, |theme| theme.apply_config(&theme_config));
             }
         })
     {

@@ -67,7 +67,11 @@ impl SettingsPanel {
                         .get(&theme_name)
                         .cloned()
                     {
-                        gpui_kit::component::Theme::global_mut(cx).apply_config(&theme_config);
+                        // `update` also rebuilds the Base layer's copy of the
+                        // theme, which draws the scrollbars.
+                        gpui_kit::component::Theme::update(cx, |theme| {
+                            theme.apply_config(&theme_config)
+                        });
                     }
 
                     app_state.update(cx, |state, cx| {
