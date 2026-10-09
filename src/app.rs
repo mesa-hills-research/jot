@@ -1,14 +1,14 @@
 use crate::actions::*;
 use crate::components::{
-    Editor, JotTabBar, JotTitleBar, MenuBar, SearchPanel, SettingsPanel, StatusBar, View,
-    attempt_close_window, close_tab_with_prompt,
+    Editor, JotTabBar, JotTitleBar, MenuBar, SettingsPanel, StatusBar, View, attempt_close_window,
+    close_tab_with_prompt,
 };
 use crate::state::{AppEvent, AppState};
 use gpui_kit::component::{
     ActiveTheme, WindowExt,
     button::{Button, ButtonVariants},
     dialog::{DialogAction, DialogClose, DialogFooter},
-    input::{Input, InputState},
+    input::{self, Input, InputState},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder;
@@ -20,7 +20,6 @@ pub struct JotApp {
     tab_bar: Entity<JotTabBar>,
     editor: Entity<Editor>,
     status_bar: Entity<StatusBar>,
-    search_panel: Entity<SearchPanel>,
     settings_panel: Entity<SettingsPanel>,
     goto_line_input: Entity<InputState>,
     focus_handle: FocusHandle,
@@ -50,7 +49,6 @@ impl JotApp {
         let tab_bar = cx.new(|_| JotTabBar::new(app_state.clone()));
         let editor = cx.new(|cx| Editor::new(app_state.clone(), window, cx));
         let status_bar = cx.new(|_| StatusBar::new(app_state.clone()));
-        let search_panel = cx.new(|cx| SearchPanel::new(app_state.clone(), window, cx));
         let settings_panel = cx.new(|cx| SettingsPanel::new(app_state.clone(), window, cx));
         let goto_line_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Line number..."));
@@ -62,7 +60,6 @@ impl JotApp {
             tab_bar,
             editor,
             status_bar,
-            search_panel,
             settings_panel,
             goto_line_input,
             focus_handle,
@@ -242,6 +239,18 @@ impl JotApp {
             .detach();
     }
 
+    /// Opens the active document's find panel, or find and replace.
+    fn open_search(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(doc) = self.app_state.read(cx).active_document() else {
+            return;
+        };
+        let editor_state = doc.read(cx).editor_state.clone();
+        editor_state.update(cx, |state, cx| {
+            state.focus(window, cx);
+            state.open_search(replace, cx);
+        });
+    }
+
     fn bind_global_actions(&self, div: Div, cx: &mut Context<Self>) -> Div {
         div.key_context(APP_CONTEXT)
             .on_action(cx.listener(|this, action: &NewTab, window, cx| {
@@ -318,19 +327,14 @@ impl JotApp {
                     state.on_open_settings(action, window, cx);
                 });
             }))
-            .on_action(cx.listener(|this, action: &Find, window, cx| {
-                this.app_state.update(cx, |state, cx| {
-                    state.on_find(action, window, cx);
-                });
-                this.search_panel
-                    .update(cx, |panel, cx| panel.focus_search(window, cx));
+            // The editor opens its own find and replace panel on Ctrl+F and
+            // Ctrl+H. These run when the action comes from elsewhere, such as
+            // the Edit menu.
+            .on_action(cx.listener(|this, _: &input::Search, window, cx| {
+                this.open_search(false, window, cx);
             }))
-            .on_action(cx.listener(|this, action: &Replace, window, cx| {
-                this.app_state.update(cx, |state, cx| {
-                    state.on_replace(action, window, cx);
-                });
-                this.search_panel
-                    .update(cx, |panel, cx| panel.focus_search(window, cx));
+            .on_action(cx.listener(|this, _: &input::Replace, window, cx| {
+                this.open_search(true, window, cx);
             }))
             .on_action(cx.listener(|this, _: &GoToLine, window, cx| {
                 this.show_goto_line_dialog(window, cx);
@@ -374,7 +378,6 @@ impl Render for JotApp {
                     .track_focus(&self.focus_handle)
                     .when(current_view == View::Editor, |this| {
                         this.child(self.tab_bar.clone())
-                            .child(self.search_panel.clone())
                             .child(self.editor.clone())
                             .child(self.status_bar.clone())
                     })

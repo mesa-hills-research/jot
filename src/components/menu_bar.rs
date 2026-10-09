@@ -3,6 +3,7 @@ use crate::state::AppState;
 use gpui_kit::component::{
     Selectable, Sizable,
     button::{Button, ButtonVariants},
+    input,
     menu::PopupMenu,
 };
 use gpui_kit::{
@@ -132,8 +133,8 @@ impl MenuBar {
                 .separator()
                 .menu("Select All", Box::new(SelectAll))
                 .separator()
-                .menu("Find...", Box::new(Find))
-                .menu("Replace...", Box::new(Replace))
+                .menu("Find...", Box::new(input::Search))
+                .menu("Replace...", Box::new(input::Replace))
                 .menu("Go to Line...", Box::new(GoToLine))
         });
 

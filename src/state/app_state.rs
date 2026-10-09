@@ -32,8 +32,6 @@ pub struct AppState {
     untitled_counter: u32,
     pub focus_handle: FocusHandle,
     pub current_view: View,
-    pub search_visible: bool,
-    pub replace_mode: bool,
     pub is_closing_window: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -64,8 +62,6 @@ impl AppState {
             untitled_counter: 1,
             focus_handle,
             current_view: View::Editor,
-            search_visible: false,
-            replace_mode: false,
             is_closing_window: false,
             _subscriptions: Vec::new(),
         }
@@ -368,16 +364,6 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn toggle_search(&mut self, replace: bool, cx: &mut Context<Self>) {
-        if self.search_visible && self.replace_mode == replace {
-            self.search_visible = false;
-        } else {
-            self.search_visible = true;
-            self.replace_mode = replace;
-        }
-        cx.notify();
-    }
-
     pub fn goto_line(&mut self, line: usize, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(doc) = self.active_document() {
             let editor_state = doc.read(cx).editor_state.clone();
@@ -452,14 +438,6 @@ impl AppState {
 
     pub fn on_open_settings(&mut self, _: &OpenSettings, _: &mut Window, cx: &mut Context<Self>) {
         self.show_settings(cx);
-    }
-
-    pub fn on_find(&mut self, _: &Find, _: &mut Window, cx: &mut Context<Self>) {
-        self.toggle_search(false, cx);
-    }
-
-    pub fn on_replace(&mut self, _: &Replace, _: &mut Window, cx: &mut Context<Self>) {
-        self.toggle_search(true, cx);
     }
 
     pub fn on_next_tab(&mut self, _: &NextTab, _: &mut Window, cx: &mut Context<Self>) {
