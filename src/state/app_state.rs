@@ -145,6 +145,47 @@ impl AppState {
         cx.notify();
     }
 
+    /// Shows or hides the line numbers of every document.
+    pub fn set_line_numbers(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings.line_numbers = enabled;
+        self.settings_changed(cx);
+    }
+
+    /// Turns word wrap on or off in every document.
+    pub fn set_word_wrap(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings.word_wrap = enabled;
+        self.settings_changed(cx);
+    }
+
+    /// Scales the editor's text, in percent of the font size.
+    pub fn set_zoom_level(&mut self, zoom_level: u32, cx: &mut Context<Self>) {
+        self.settings.zoom_level = zoom_level;
+        self.settings_changed(cx);
+    }
+
+    /// Turns the inline word suggestions on or off.
+    pub fn set_autocomplete(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings.autocomplete = enabled;
+        self.autocomplete_enabled.set(enabled);
+        self.settings.save();
+        cx.notify();
+    }
+
+    /// Turns the closing of XML tags on or off.
+    pub fn set_xml_auto_complete(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings.xml_auto_complete = enabled;
+        self.settings.save();
+        cx.notify();
+    }
+
+    /// Saves the settings and tells the app, which applies them to every
+    /// document and updates the View menu.
+    fn settings_changed(&mut self, cx: &mut Context<Self>) {
+        self.settings.save();
+        cx.emit(AppEvent::SettingsChanged);
+        cx.notify();
+    }
+
     /// Turns the smooth caret on or off in every open document, and new ones.
     pub fn set_smooth_caret(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.settings.smooth_caret = enabled;
