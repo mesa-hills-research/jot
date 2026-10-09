@@ -2350,7 +2350,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=dd7f405ced8800911f2412c743d3aacbae752d1e#dd7f405ced8800911f2412c743d3aacbae752d1e"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=77cfe658553933656ef3931491e55372644ed8ac#77cfe658553933656ef3931491e55372644ed8ac"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2390,7 +2390,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=dd7f405ced8800911f2412c743d3aacbae752d1e#dd7f405ced8800911f2412c743d3aacbae752d1e"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=77cfe658553933656ef3931491e55372644ed8ac#77cfe658553933656ef3931491e55372644ed8ac"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2435,7 +2435,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=dd7f405ced8800911f2412c743d3aacbae752d1e#dd7f405ced8800911f2412c743d3aacbae752d1e"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=77cfe658553933656ef3931491e55372644ed8ac#77cfe658553933656ef3931491e55372644ed8ac"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2446,7 +2446,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=dd7f405ced8800911f2412c743d3aacbae752d1e#dd7f405ced8800911f2412c743d3aacbae752d1e"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=77cfe658553933656ef3931491e55372644ed8ac#77cfe658553933656ef3931491e55372644ed8ac"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -2459,7 +2459,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=dd7f405ced8800911f2412c743d3aacbae752d1e#dd7f405ced8800911f2412c743d3aacbae752d1e"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=77cfe658553933656ef3931491e55372644ed8ac#77cfe658553933656ef3931491e55372644ed8ac"
 dependencies = [
  "anyhow",
  "gpui-pre",
