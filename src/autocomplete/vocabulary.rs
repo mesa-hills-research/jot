@@ -32,6 +32,26 @@
 //! a crash leaves one or the other. Near its size cap the vocabulary drops
 //! the entries it has seen least, and goes on learning. A file that doesn't
 //! parse is kept aside rather than written over.
+//!
+//! # Several jots at once
+//!
+//! Each running jot loads the file once, at startup, and learns on its own.
+//! A save adds what this jot learned since its last save to what the file
+//! holds now, so every jot's learning adds up, whatever the order of saves.
+//! A save takes the lock on `vocabulary.lock` beside the file, reads the
+//! file, adds its counts, writes the file whole and goes on from the result.
+//! So another jot's learning reaches this one when this one next saves. A
+//! save that can't get the lock within [`LOCK_WAIT`] keeps its learning for
+//! the next one.
+//!
+//! Loading takes no lock, since a save replaces the file in one step. A
+//! crash loses only what that jot learned since its last save. A file gone
+//! or damaged by the time of a save gives way to this jot's own vocabulary,
+//! learning included, and a damaged one is kept aside as at loading.
+//!
+//! Pruning applies to the file's counts with the new learning added. An
+//! entry pruned from the file comes back at the next save of a jot that has
+//! seen it since, counted from what that jot saw since its last save.
 
 use super::{
     LOCAL_COUNT_CAP, MODEL_VERSION, NON_DICTIONARY_MIN_LOCAL_FREQ, NON_DICTIONARY_MIN_SHARED_FREQ,
@@ -43,6 +63,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
+use std::fs::{File, TryLockError};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -54,6 +75,13 @@ pub(super) const SENTENCE_START: &str = "<s>";
 
 /// Minimum interval between full rebuilds of the local document index.
 const LOCAL_REBUILD_INTERVAL: Duration = Duration::from_secs(2);
+
+/// How long a save waits for another jot to finish saving. Saving a
+/// vocabulary at its size cap takes a second or two.
+const LOCK_WAIT: Duration = Duration::from_secs(5);
+
+/// How often a save waiting for the lock tries it again.
+const LOCK_RETRY: Duration = Duration::from_millis(20);
 
 /// Halves of contractions that earlier versions learned as words of their
 /// own, which only ever come from "n't". "don" also stands alone in its
@@ -120,6 +148,17 @@ impl Forms {
         }
     }
 
+    /// Adds the counts of `other`, the same word's.
+    fn add_all(&mut self, other: &Forms) {
+        self.count = self.count.saturating_add(other.count);
+        for (form, count) in &other.cased {
+            match self.cased.iter_mut().find(|(cased, _)| cased == form) {
+                Some((_, cased_count)) => *cased_count = cased_count.saturating_add(*count),
+                None => self.cased.push((form.clone(), *count)),
+            }
+        }
+    }
+
     /// The form the word was most often written in. A tie goes to the folded
     /// form, then to the form seen first.
     pub fn best<'a>(&'a self, folded: &'a str) -> &'a str {
@@ -183,6 +222,20 @@ impl Successors {
         if form != folded {
             let entry = self.cased.entry(form.into()).or_default();
             *entry = entry.saturating_add(count);
+        }
+    }
+
+    /// Adds the counts of `other`, the same context's.
+    fn add_all(&mut self, other: &Successors) {
+        self.total = self.total.saturating_add(other.total);
+        for (counts, others) in [
+            (&mut self.counts, &other.counts),
+            (&mut self.cased, &other.cased),
+        ] {
+            for (word, count) in others {
+                let entry = counts.entry(word.clone()).or_default();
+                *entry = entry.saturating_add(*count);
+            }
         }
     }
 
@@ -297,6 +350,25 @@ impl Counts {
         }
     }
 
+    /// Adds the counts of `other`.
+    fn add(&mut self, other: &Counts) {
+        for (word, forms) in &other.words {
+            self.words.entry(word.clone()).or_default().add_all(forms);
+        }
+        self.total += other.total;
+        for (ngrams, others) in [
+            (&mut self.bigrams, &other.bigrams),
+            (&mut self.trigrams, &other.trigrams),
+        ] {
+            for (context, successors) in others {
+                ngrams
+                    .entry(context.clone())
+                    .or_default()
+                    .add_all(successors);
+            }
+        }
+    }
+
     /// Drops the entries of `level` seen `floor` times or fewer.
     fn prune(&mut self, level: Level, floor: u32) {
         match level {
@@ -402,8 +474,10 @@ fn write_whole(path: &Path, data: &[u8]) -> io::Result<()> {
 }
 
 /// Renames `from` over `to`. On Windows, as elsewhere, the rename replaces a
-/// file that exists. There another program, such as a virus scanner, can
-/// hold the file open for a moment, so a refusal is tried again a few times.
+/// file that exists, even one another jot has open as it loads, since the
+/// standard library opens files with delete sharing. Another program, such
+/// as a virus scanner, can hold the file open without it for a moment, so a
+/// refusal is tried again a few times.
 fn replace(from: &Path, to: &Path) -> io::Result<()> {
     let mut tries = 0;
     loop {
@@ -419,6 +493,60 @@ fn replace(from: &Path, to: &Path) -> io::Result<()> {
             result => return result,
         }
     }
+}
+
+/// The lock file beside the vocabulary at `path`: `vocabulary.lock`. It stays
+/// there between saves.
+fn lock_path(path: &Path) -> PathBuf {
+    path.with_extension("lock")
+}
+
+/// Takes the lock on the vocabulary at `path`, waiting up to `wait` while
+/// another jot holds it. The lock is released when the returned file is
+/// dropped or the process ends, however it ends.
+fn lock(path: &Path, wait: Duration) -> io::Result<File> {
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path(path))?;
+    let deadline = Instant::now() + wait;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(LOCK_RETRY);
+            }
+            Err(TryLockError::WouldBlock) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("another jot was saving it for over {} ms", wait.as_millis()),
+                ));
+            }
+            Err(TryLockError::Error(error)) => return Err(error),
+        }
+    }
+}
+
+/// Why the vocabulary file couldn't be read.
+enum ReadError {
+    /// It couldn't be opened or read.
+    Unreadable(io::Error),
+    /// It doesn't parse, such as a file cut short.
+    Damaged(serde_json::Error),
+}
+
+/// Reads the vocabulary file at `path`: `None` when there is none.
+fn read_file(path: &Path) -> Result<Option<SavedVocabulary>, ReadError> {
+    let data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(ReadError::Unreadable(error)),
+    };
+    serde_json::from_slice(&data)
+        .map(Some)
+        .map_err(ReadError::Damaged)
 }
 
 /// The key of the trigram context `first second`.
@@ -441,6 +569,19 @@ struct SavedVocabulary {
     bigrams: HashMap<String, HashMap<String, u32>>,
     #[serde(default)]
     trigrams: HashMap<String, HashMap<String, u32>>,
+}
+
+impl SavedVocabulary {
+    /// Drops the n-grams of a file saved before version 2, which an older
+    /// tokenizer made, and keeps its words. Returns whether it did.
+    fn migrate(&mut self) -> bool {
+        let migrated = self.version < MODEL_VERSION;
+        if migrated {
+            self.bigrams.clear();
+            self.trigrams.clear();
+        }
+        migrated
+    }
 }
 
 /// `vocabulary.json` as written, straight from the counts.
@@ -506,14 +647,57 @@ impl Serialize for SavingSuccessors<'_> {
     }
 }
 
+/// `counts` as `vocabulary.json` holds them.
+fn to_json(counts: &Counts) -> serde_json::Result<Vec<u8>> {
+    serde_json::to_vec(&Saving(counts))
+}
+
+/// `counts` as `vocabulary.json` holds them, in at most `cap` bytes. Larger
+/// counts first drop their rarest entries, until they fit in seven eighths of
+/// `cap`, so they have room to grow before they prune again: the trigrams
+/// seen once, then the bigrams and then the words, then those seen twice,
+/// and so on.
+fn pruned_json(counts: &mut Counts, cap: u64) -> serde_json::Result<Vec<u8>> {
+    let mut data = to_json(counts)?;
+    if data.len() as u64 <= cap {
+        return Ok(data);
+    }
+    let before = data.len();
+    let target = cap / 8 * 7;
+    let mut floor = 1;
+    'pruning: loop {
+        for level in [Level::Trigrams, Level::Bigrams, Level::Words] {
+            counts.prune(level, floor);
+            data = to_json(counts)?;
+            if data.len() as u64 <= target {
+                break 'pruning;
+            }
+        }
+        floor += 1;
+    }
+    log::info!(
+        "The word suggestions' vocabulary reached {before} bytes. It dropped the entries seen \
+         {floor} times or fewer and is now {} bytes.",
+        data.len()
+    );
+    Ok(data)
+}
+
 /// The persistent, cross-document vocabulary learned from typed text.
 pub struct SharedVocabulary {
     counts: Counts,
+    /// What it learned since it last saved, which the next save adds to the
+    /// file.
+    unsaved: Counts,
     dictionary: Rc<Dictionary>,
+    /// Whether there is anything to save: learning, or a file from an
+    /// earlier version to write again.
     dirty: bool,
     /// The file it saves to: none in tests, or when the file there couldn't
     /// be read and mustn't be written over.
     file: Option<PathBuf>,
+    /// How long a save waits for another jot to finish saving.
+    lock_wait: Duration,
 }
 
 impl SharedVocabulary {
@@ -521,9 +705,11 @@ impl SharedVocabulary {
     pub fn new() -> Self {
         Self {
             counts: Counts::default(),
+            unsaved: Counts::default(),
             dictionary: Rc::new(Dictionary::empty()),
             dirty: false,
             file: None,
+            lock_wait: LOCK_WAIT,
         }
     }
 
@@ -552,27 +738,19 @@ impl SharedVocabulary {
     /// saved this session.
     fn load_from(path: PathBuf, dictionary: Rc<Dictionary>) -> Self {
         let mut vocabulary = Self::with_dictionary(dictionary);
-        let data = match std::fs::read(&path) {
-            Ok(data) => data,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                vocabulary.file = Some(path);
-                return vocabulary;
-            }
-            Err(error) => {
-                log::error!(
-                    "Couldn't read the word suggestions' vocabulary {}: {error}. It won't be saved \
-                     over this session.",
-                    path.display()
-                );
-                return vocabulary;
-            }
-        };
-        match serde_json::from_slice::<SavedVocabulary>(&data) {
+        match read_file(&path) {
             Ok(saved) => {
-                vocabulary.read(saved);
+                if let Some(saved) = saved {
+                    vocabulary.read(saved);
+                }
                 vocabulary.file = Some(path);
             }
-            Err(error) => match set_aside(&path) {
+            Err(ReadError::Unreadable(error)) => log::error!(
+                "Couldn't read the word suggestions' vocabulary {}: {error}. It won't be saved \
+                 over this session.",
+                path.display()
+            ),
+            Err(ReadError::Damaged(error)) => match set_aside(&path) {
                 Ok(kept) => {
                     log::warn!(
                         "The word suggestions' vocabulary {} is damaged ({error}). It was kept as {}, \
@@ -580,6 +758,10 @@ impl SharedVocabulary {
                         path.display(),
                         kept.display()
                     );
+                    vocabulary.file = Some(path);
+                }
+                // Another jot starting at the same time moved it first.
+                Err(move_error) if move_error.kind() == io::ErrorKind::NotFound => {
                     vocabulary.file = Some(path);
                 }
                 Err(move_error) => log::error!(
@@ -595,49 +777,15 @@ impl SharedVocabulary {
     /// Takes the counts of a file. One saved before version 2 keeps its
     /// words and drops its n-grams.
     fn read(&mut self, mut saved: SavedVocabulary) {
-        let migrated = saved.version < MODEL_VERSION;
-        if migrated {
-            saved.bigrams.clear();
-            saved.trigrams.clear();
-        }
+        let migrated = saved.migrate();
         self.counts = Counts::from_saved(saved);
         self.dirty = migrated;
     }
 
     /// The vocabulary as `vocabulary.json` holds it.
+    #[cfg(test)]
     fn to_json(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(&Saving(&self.counts))
-    }
-
-    /// The vocabulary as `vocabulary.json` holds it, in at most `cap` bytes.
-    /// A larger one first drops its rarest entries, until it fits in seven
-    /// eighths of `cap`, so it has room to grow before it prunes again: the
-    /// trigrams seen once, then the bigrams and then the words, then those
-    /// seen twice, and so on.
-    fn pruned_json(&mut self, cap: u64) -> serde_json::Result<Vec<u8>> {
-        let mut data = self.to_json()?;
-        if data.len() as u64 <= cap {
-            return Ok(data);
-        }
-        let before = data.len();
-        let target = cap / 8 * 7;
-        let mut floor = 1;
-        'pruning: loop {
-            for level in [Level::Trigrams, Level::Bigrams, Level::Words] {
-                self.counts.prune(level, floor);
-                data = self.to_json()?;
-                if data.len() as u64 <= target {
-                    break 'pruning;
-                }
-            }
-            floor += 1;
-        }
-        log::info!(
-            "The word suggestions' vocabulary reached {before} bytes. It dropped the entries seen \
-             {floor} times or fewer and is now {} bytes.",
-            data.len()
-        );
-        Ok(data)
+        to_json(&self.counts)
     }
 
     /// Returns the spelling dictionary shared with autocomplete hygiene.
@@ -645,14 +793,13 @@ impl SharedVocabulary {
         self.dictionary.clone()
     }
 
-    /// Persists the vocabulary if it has changed since the last save.
+    /// Adds what it learned since its last save to the file, if anything.
     pub fn save(&mut self) {
         self.save_within(VOCAB_MAX_BYTES);
     }
 
-    /// Saves in at most `cap` bytes, pruning to fit. The file is written in
-    /// full beside the old one and then takes its place, so a crash leaves
-    /// one or the other whole.
+    /// Saves in at most `cap` bytes, pruning to fit. What a save couldn't
+    /// write stays for the next one.
     fn save_within(&mut self, cap: u64) {
         if !self.dirty {
             return;
@@ -660,23 +807,75 @@ impl SharedVocabulary {
         let Some(path) = self.file.clone() else {
             return;
         };
-        let data = match self.pruned_json(cap) {
-            Ok(data) => data,
-            Err(error) => {
-                log::error!("Couldn't save the word suggestions' vocabulary: {error}");
-                return;
-            }
-        };
+        if let Err(error) = self.merge_into(&path, cap) {
+            log::error!(
+                "Couldn't save the word suggestions' vocabulary {}: {error}. What was learned \
+                 since the last save is kept for the next one.",
+                path.display()
+            );
+        }
+    }
+
+    /// Adds the unsaved learning to the file at `path` under its lock, writes
+    /// the file whole and takes the result as this vocabulary. The file is
+    /// written beside the old one and then takes its place, so a crash leaves
+    /// one or the other whole.
+    fn merge_into(&mut self, path: &Path, cap: u64) -> io::Result<()> {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        match write_whole(&path, &data) {
-            Ok(()) => self.dirty = false,
-            Err(error) => log::error!(
-                "Couldn't save the word suggestions' vocabulary {}: {error}",
-                path.display()
-            ),
+        let lock = match lock(path, self.lock_wait) {
+            Ok(lock) => Some(lock),
+            Err(error) if error.kind() == io::ErrorKind::TimedOut => return Err(error),
+            // A file system that can't lock files saves as if one jot ran.
+            Err(error) => {
+                log::warn!(
+                    "Couldn't lock the word suggestions' vocabulary {} ({error}). It is saved \
+                     without the lock.",
+                    path.display()
+                );
+                None
+            }
+        };
+        let mut merged = match read_file(path) {
+            Ok(Some(mut saved)) => {
+                saved.migrate();
+                let mut counts = Counts::from_saved(saved);
+                counts.add(&self.unsaved);
+                Some(counts)
+            }
+            // Gone or damaged, the file has nothing to add to this
+            // vocabulary, which takes its place.
+            Ok(None) => None,
+            Err(ReadError::Damaged(error)) => {
+                match set_aside(path) {
+                    Ok(kept) => log::warn!(
+                        "The word suggestions' vocabulary {} is damaged ({error}). It was kept as \
+                         {}, and this session's vocabulary took its place.",
+                        path.display(),
+                        kept.display()
+                    ),
+                    Err(move_error) if move_error.kind() == io::ErrorKind::NotFound => {}
+                    Err(move_error) => {
+                        return Err(io::Error::other(format!(
+                            "it is damaged ({error}), and couldn't be moved aside ({move_error})"
+                        )));
+                    }
+                }
+                None
+            }
+            Err(ReadError::Unreadable(error)) => return Err(error),
+        };
+        let counts = merged.as_mut().unwrap_or(&mut self.counts);
+        let data = pruned_json(counts, cap)?;
+        write_whole(path, &data)?;
+        drop(lock);
+        if let Some(merged) = merged {
+            self.counts = merged;
         }
+        self.unsaved = Counts::default();
+        self.dirty = false;
+        Ok(())
     }
 
     pub(super) fn counts(&self) -> &Counts {
@@ -689,6 +888,7 @@ impl SharedVocabulary {
         let mut learned = Vec::new();
         for (starts_sentence, run) in sentence_runs(sentence) {
             self.counts.add_run(starts_sentence, &run);
+            self.unsaved.add_run(starts_sentence, &run);
             learned.extend(
                 run.iter()
                     .map(|word| fold(canonical_prediction_word(word)).into_owned()),
@@ -725,16 +925,21 @@ impl SharedVocabulary {
     #[cfg(test)]
     pub(super) fn learn_word(&mut self, word: &str) {
         self.counts.add_word(word, 1);
+        self.unsaved.add_word(word, 1);
+        self.dirty = true;
     }
 
     /// Counts `second` as having followed `first` once more.
     #[cfg(test)]
     pub(super) fn learn_bigram(&mut self, first: &str, second: &str) {
-        self.counts
-            .bigrams
-            .entry(fold(first).as_ref().into())
-            .or_default()
-            .add(second, &fold(second), 1);
+        for counts in [&mut self.counts, &mut self.unsaved] {
+            counts
+                .bigrams
+                .entry(fold(first).as_ref().into())
+                .or_default()
+                .add(second, &fold(second), 1);
+        }
+        self.dirty = true;
     }
 }
 
@@ -1007,7 +1212,7 @@ mod tests {
         vocabulary.save();
         vocabulary.learn_sentence("Mosses grow faster");
         vocabulary.save();
-        assert_eq!(scratch.names(), ["vocabulary.json"]);
+        assert_eq!(scratch.names(), ["vocabulary.json", "vocabulary.lock"]);
         let reloaded = scratch.load();
         assert_eq!(reloaded.counts.word_count("grow"), 2);
         assert!(!reloaded.dirty);
@@ -1026,7 +1231,11 @@ mod tests {
         vocabulary.save();
         assert_eq!(
             scratch.names(),
-            ["vocabulary.damaged.json", "vocabulary.json"]
+            [
+                "vocabulary.damaged.json",
+                "vocabulary.json",
+                "vocabulary.lock"
+            ]
         );
         assert_eq!(
             std::fs::read(scratch.0.join("vocabulary.damaged.json")).unwrap(),
@@ -1038,7 +1247,11 @@ mod tests {
         scratch.load();
         assert_eq!(
             scratch.names(),
-            ["vocabulary.damaged-2.json", "vocabulary.damaged.json"]
+            [
+                "vocabulary.damaged-2.json",
+                "vocabulary.damaged.json",
+                "vocabulary.lock"
+            ]
         );
     }
 
@@ -1081,6 +1294,346 @@ mod tests {
         vocabulary.learn_sentence("Mosses grow faster");
         vocabulary.save_within(cap);
         assert_eq!(scratch.load().counts.word_count("mosses"), 1);
+    }
+
+    /// The file `scratch` holds.
+    fn saved(scratch: &Scratch) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(scratch.file()).unwrap()).unwrap()
+    }
+
+    /// The file one vocabulary would save after learning `sentences`.
+    fn learned_from<'a>(sentences: impl IntoIterator<Item = &'a str>) -> serde_json::Value {
+        let mut vocabulary = SharedVocabulary::new();
+        for sentence in sentences {
+            vocabulary.learn_sentence(sentence);
+        }
+        serde_json::from_slice(&vocabulary.to_json().unwrap()).unwrap()
+    }
+
+    /// Two jots on one file each add what they learned to what the file
+    /// holds, so every count is the sum, whichever saves first.
+    #[test]
+    fn jots_on_one_file_add_up_their_learning() {
+        let first_learns = [
+            "Ferns grow slowly",
+            "Mosses grow faster",
+            "Ferns grow slowly",
+        ];
+        let second_learns = [
+            "Ferns grow slowly",
+            "ferns need shade",
+            "Lichens grow nowhere",
+        ];
+        for first_saves_first in [true, false] {
+            let scratch = Scratch::new(&format!("merge-{first_saves_first}"));
+            let mut earlier = scratch.load();
+            earlier.learn_sentence("Ferns grow slowly");
+            earlier.save();
+
+            let mut first = scratch.load();
+            let mut second = scratch.load();
+            for sentence in first_learns {
+                first.learn_sentence(sentence);
+            }
+            for sentence in second_learns {
+                second.learn_sentence(sentence);
+            }
+            let (one, other) = if first_saves_first {
+                (&mut first, &mut second)
+            } else {
+                (&mut second, &mut first)
+            };
+            one.save();
+            other.save();
+            let mut all = vec!["Ferns grow slowly"];
+            all.extend(first_learns);
+            all.extend(second_learns);
+            assert_eq!(saved(&scratch), learned_from(all.iter().copied()));
+            // The one that saved last works from the sum.
+            let worked_from: serde_json::Value =
+                serde_json::from_slice(&other.to_json().unwrap()).unwrap();
+            assert_eq!(worked_from, learned_from(all.iter().copied()));
+
+            // A save adds only what was learned since the last one.
+            one.learn_sentence("Mosses grow faster");
+            one.save();
+            other.save();
+            all.push("Mosses grow faster");
+            assert_eq!(saved(&scratch), learned_from(all.iter().copied()));
+        }
+    }
+
+    /// A save that can't get the lock in time keeps its learning, and a
+    /// later one adds it.
+    #[test]
+    fn a_save_kept_from_the_lock_keeps_its_learning() {
+        let scratch = Scratch::new("locked");
+        let mut vocabulary = scratch.load();
+        vocabulary.lock_wait = Duration::from_millis(100);
+        vocabulary.learn_sentence("Ferns grow slowly");
+        let held = lock(&scratch.file(), Duration::ZERO).unwrap();
+        let started = Instant::now();
+        vocabulary.save();
+        assert!(started.elapsed() >= Duration::from_millis(100));
+        assert!(vocabulary.dirty);
+        assert!(!scratch.file().exists());
+
+        drop(held);
+        vocabulary.learn_sentence("Mosses grow faster");
+        vocabulary.save();
+        assert!(!vocabulary.dirty);
+        assert_eq!(
+            saved(&scratch),
+            learned_from(["Ferns grow slowly", "Mosses grow faster"])
+        );
+    }
+
+    /// A jot that ends without saving, as in a crash, loses only what it
+    /// learned since its last save.
+    #[test]
+    fn a_crash_loses_only_what_that_jot_learned_since_its_last_save() {
+        let scratch = Scratch::new("crash");
+        let mut first = scratch.load();
+        let mut second = scratch.load();
+        first.learn_sentence("Ferns grow slowly");
+        first.save();
+        second.learn_sentence("Mosses grow faster");
+        second.save();
+        first.learn_sentence("Lichens grow nowhere");
+        drop(first);
+        second.learn_sentence("Ferns need shade");
+        second.save();
+        assert_eq!(
+            saved(&scratch),
+            learned_from([
+                "Ferns grow slowly",
+                "Mosses grow faster",
+                "Ferns need shade"
+            ])
+        );
+    }
+
+    /// A file damaged by the time of a save is kept aside, as at loading,
+    /// and one gone is written again. Either way this jot's vocabulary takes
+    /// its place.
+    #[test]
+    fn a_file_damaged_or_gone_by_a_save_gives_way_to_this_vocabulary() {
+        let scratch = Scratch::new("damaged-at-save");
+        let mut vocabulary = scratch.load();
+        vocabulary.learn_sentence("Ferns grow slowly");
+        vocabulary.save();
+        vocabulary.learn_sentence("Mosses grow faster");
+        std::fs::write(scratch.file(), "not a vocabulary").unwrap();
+        vocabulary.save();
+        assert_eq!(
+            scratch.names(),
+            [
+                "vocabulary.damaged.json",
+                "vocabulary.json",
+                "vocabulary.lock"
+            ]
+        );
+        assert_eq!(
+            std::fs::read(scratch.0.join("vocabulary.damaged.json")).unwrap(),
+            b"not a vocabulary"
+        );
+        assert_eq!(
+            saved(&scratch),
+            learned_from(["Ferns grow slowly", "Mosses grow faster"])
+        );
+
+        std::fs::remove_file(scratch.file()).unwrap();
+        vocabulary.learn_sentence("Lichens grow nowhere");
+        vocabulary.save();
+        assert_eq!(
+            saved(&scratch),
+            learned_from([
+                "Ferns grow slowly",
+                "Mosses grow faster",
+                "Lichens grow nowhere"
+            ])
+        );
+    }
+
+    /// A file an earlier version wrote meanwhile keeps its words and drops
+    /// its n-grams, as at loading.
+    #[test]
+    fn a_file_from_an_earlier_version_is_migrated_as_it_merges() {
+        let scratch = Scratch::new("migrate-at-save");
+        let mut vocabulary = scratch.load();
+        vocabulary.learn_sentence("Ferns grow slowly");
+        std::fs::write(
+            scratch.file(),
+            r#"{"words":{"Ferns":4},"bigrams":{"Ferns":{"grow":4}}}"#,
+        )
+        .unwrap();
+        vocabulary.save();
+        let reloaded = scratch.load();
+        assert_eq!(reloaded.counts.word_count("ferns"), 5);
+        assert_eq!(bigram(&reloaded, "ferns", "grow"), 1);
+        assert!(!reloaded.dirty);
+    }
+
+    /// An entry one jot pruned comes back when another saves after seeing
+    /// it, with only what that one saw since its last save.
+    #[test]
+    fn a_pruned_entry_comes_back_with_the_new_count() {
+        let scratch = Scratch::new("prune-and-merge");
+        let mut first = scratch.load();
+        let mut second = scratch.load();
+        for _ in 0..5 {
+            first.learn_sentence("Thanks for the update");
+        }
+        for number in 0..200 {
+            first.learn_sentence(&format!("Notes on topic{number} today"));
+        }
+        let cap = first.to_json().unwrap().len() as u64 / 2;
+        first.save_within(cap);
+        assert_eq!(bigram(&scratch.load(), "on", "topic7"), 0);
+
+        second.learn_sentence("Notes on topic7 today");
+        second.save();
+        let reloaded = scratch.load();
+        assert_eq!(bigram(&reloaded, "on", "topic7"), 1);
+        assert_eq!(reloaded.counts.word_count("topic7"), 2);
+        assert_eq!(bigram(&reloaded, "notes", "on"), 201);
+    }
+
+    /// The environment variable that makes [`jot_process`] run: the file,
+    /// then on the next line what to do.
+    const PROCESS_TASK: &str = "JOT_VOCABULARY_TEST_PROCESS";
+
+    /// What [`jot_process`] prints once it holds the lock.
+    const LOCKED: &str = "the other jot holds the lock";
+
+    /// Another jot, running [`jot_process`] in a process of its own. It is
+    /// killed if the test ends first.
+    struct OtherJot(Option<std::process::Child>);
+
+    impl OtherJot {
+        fn spawn(file: &Path, task: &str) -> Self {
+            let tests = module_path!().split_once("::").unwrap().1;
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([&format!("{tests}::jot_process"), "--exact", "--ignored"])
+                .args(["--nocapture", "--test-threads=1"])
+                .env(PROCESS_TASK, format!("{}\n{task}", file.display()))
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            Self(Some(child))
+        }
+
+        /// Waits for it to finish, and checks that it succeeded.
+        fn finish(mut self) {
+            let output = self.0.take().unwrap().wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    impl Drop for OtherJot {
+        fn drop(&mut self) {
+            if let Some(child) = &mut self.0 {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+
+    /// Another jot, for the tests that run several processes. `learn N
+    /// sentence` learns the sentence and saves, N times. `crash` learns and
+    /// saves a sentence, learns another, then holds the lock until it is
+    /// killed.
+    #[test]
+    #[ignore = "run as a process of its own by the tests with several jots"]
+    fn jot_process() {
+        let Ok(task) = std::env::var(PROCESS_TASK) else {
+            return;
+        };
+        let (file, task) = task.split_once('\n').unwrap();
+        let file = PathBuf::from(file);
+        let mut vocabulary =
+            SharedVocabulary::load_from(file.clone(), Rc::new(Dictionary::empty()));
+        if let Some(task) = task.strip_prefix("learn ") {
+            let (times, sentence) = task.split_once(' ').unwrap();
+            for _ in 0..times.parse().unwrap() {
+                vocabulary.learn_sentence(sentence);
+                vocabulary.save();
+                assert!(!vocabulary.dirty, "a save failed");
+            }
+        } else {
+            assert_eq!(task, "crash");
+            vocabulary.learn_sentence("Ferns grow slowly");
+            vocabulary.save();
+            vocabulary.learn_sentence("Mosses grow faster");
+            let _held = lock(&file, Duration::ZERO).unwrap();
+            println!("{LOCKED}");
+            io::stdout().flush().unwrap();
+            io::stdin().read_line(&mut String::new()).unwrap();
+        }
+    }
+
+    /// jots in processes of their own, saving at the same time as each
+    /// other, add up their learning.
+    #[test]
+    fn jots_in_separate_processes_add_up_their_learning() {
+        let scratch = Scratch::new("processes");
+        let jots = ["Ferns grow slowly", "Mosses grow faster"]
+            .map(|sentence| OtherJot::spawn(&scratch.file(), &format!("learn 50 {sentence}")));
+        let mut vocabulary = scratch.load();
+        for _ in 0..50 {
+            vocabulary.learn_sentence("Ferns need shade");
+            vocabulary.save();
+            assert!(!vocabulary.dirty);
+        }
+        for jot in jots {
+            jot.finish();
+        }
+        let all = [
+            "Ferns grow slowly",
+            "Mosses grow faster",
+            "Ferns need shade",
+        ];
+        assert_eq!(saved(&scratch), learned_from(all.repeat(50)));
+    }
+
+    /// A jot killed while it holds the lock leaves it free, and loses only
+    /// what it learned since its last save.
+    #[test]
+    fn a_jot_killed_holding_the_lock_leaves_it_free() {
+        let scratch = Scratch::new("killed");
+        let mut jot = OtherJot::spawn(&scratch.file(), "crash");
+        let output = jot.0.as_mut().unwrap().stdout.take().unwrap();
+        let (locked, has_locked) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in io::BufRead::lines(io::BufReader::new(output)) {
+                if line.is_ok_and(|line| line.contains(LOCKED)) {
+                    let _ = locked.send(());
+                }
+            }
+        });
+        has_locked
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the other jot took the lock");
+
+        let mut vocabulary = scratch.load();
+        vocabulary.lock_wait = Duration::from_millis(100);
+        vocabulary.learn_sentence("Lichens grow nowhere");
+        vocabulary.save();
+        assert!(vocabulary.dirty, "the other jot holds the lock");
+
+        drop(jot);
+        vocabulary.save();
+        assert!(!vocabulary.dirty);
+        assert_eq!(
+            saved(&scratch),
+            learned_from(["Ferns grow slowly", "Lichens grow nowhere"])
+        );
     }
 
     /// A word predicted after another shows the form it took after that one.
