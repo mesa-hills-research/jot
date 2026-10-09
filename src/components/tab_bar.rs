@@ -2,7 +2,7 @@
 
 use super::JotTab;
 use crate::components::close_tab_with_prompt;
-use crate::state::AppState;
+use crate::state::WindowState;
 use gpui_kit::component::{ActiveTheme, Selectable, h_flex};
 use gpui_kit::{
     Entity, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
@@ -11,12 +11,12 @@ use gpui_kit::{
 
 /// Tab bar displaying all open documents.
 pub struct JotTabBar {
-    app_state: Entity<AppState>,
+    window_state: Entity<WindowState>,
 }
 
 impl JotTabBar {
-    pub fn new(app_state: Entity<AppState>) -> Self {
-        Self { app_state }
+    pub fn new(window_state: Entity<WindowState>) -> Self {
+        Self { window_state }
     }
 }
 
@@ -26,7 +26,7 @@ impl Render for JotTabBar {
         _window: &mut Window,
         cx: &mut gpui_kit::Context<Self>,
     ) -> impl IntoElement {
-        let state = self.app_state.read(cx);
+        let state = self.window_state.read(cx);
         let active_index = state.active_index;
 
         div()
@@ -45,29 +45,29 @@ impl Render for JotTabBar {
                         let title = doc_read.title.clone();
                         let dirty = doc_read.dirty;
                         let selected = index == active_index;
-                        let app_state = self.app_state.clone();
+                        let window_state = self.window_state.clone();
 
                         JotTab::new(SharedString::from(format!("tab-{}", index)), title)
                             .dirty(dirty)
                             .selected(selected)
                             .on_click({
-                                let app_state = app_state.clone();
+                                let window_state = window_state.clone();
                                 move |_, _, cx| {
-                                    app_state.update(cx, |state, cx| {
+                                    window_state.update(cx, |state, cx| {
                                         state.switch_to_tab(index, cx);
                                     });
                                 }
                             })
                             .on_close({
-                                let app_state = app_state.clone();
+                                let window_state = window_state.clone();
                                 move |_, window, cx| {
-                                    close_tab_with_prompt(app_state.clone(), index, window, cx);
+                                    close_tab_with_prompt(window_state.clone(), index, window, cx);
                                 }
                             })
                             .on_middle_click({
-                                let app_state = app_state.clone();
+                                let window_state = window_state.clone();
                                 move |_, window, cx| {
-                                    close_tab_with_prompt(app_state.clone(), index, window, cx);
+                                    close_tab_with_prompt(window_state.clone(), index, window, cx);
                                 }
                             })
                     })),

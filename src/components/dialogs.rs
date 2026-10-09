@@ -1,4 +1,5 @@
-use crate::state::AppState;
+use crate::chrome;
+use crate::state::WindowState;
 use gpui_kit::component::{
     WindowExt,
     button::{Button, ButtonVariants},
@@ -7,12 +8,12 @@ use gpui_kit::component::{
 use gpui_kit::{App, Entity, ParentElement, Styled, Window, div};
 
 pub fn close_tab_with_prompt(
-    app_state: Entity<AppState>,
+    window_state: Entity<WindowState>,
     index: usize,
     window: &mut Window,
     cx: &mut App,
 ) {
-    app_state.update(cx, |state, cx| {
+    window_state.update(cx, |state, cx| {
         if let Some(doc) = state.documents.get(index) {
             doc.update(cx, |doc, cx| {
                 doc.check_dirty(cx);
@@ -20,7 +21,7 @@ pub fn close_tab_with_prompt(
         }
     });
 
-    let is_dirty = app_state
+    let is_dirty = window_state
         .read(cx)
         .documents
         .get(index)
@@ -28,72 +29,79 @@ pub fn close_tab_with_prompt(
         .unwrap_or(false);
 
     if is_dirty {
-        app_state.update(cx, |state, cx| {
+        window_state.update(cx, |state, cx| {
             state.switch_to_tab(index, cx);
         });
-        show_save_dialog_for_tab(app_state, index, window, cx);
+        show_save_dialog_for_tab(window_state, index, window, cx);
     } else {
-        app_state.update(cx, |state, cx| {
+        window_state.update(cx, |state, cx| {
             state.force_close_tab(index, window, cx);
         });
-        let is_closing = app_state.read(cx).is_closing_window;
+        let is_closing = window_state.read(cx).is_closing_window;
         if is_closing {
-            prompt_next_dirty_tab(app_state, window, cx);
+            prompt_next_dirty_tab(window_state, window, cx);
         }
     }
 }
 
 pub fn attempt_close_window(
-    app_state: Entity<AppState>,
+    window_state: Entity<WindowState>,
     window: &mut Window,
     cx: &mut App,
 ) -> bool {
-    app_state.update(cx, |state, cx| {
+    window_state.update(cx, |state, cx| {
         state.refresh_all_dirty_states(cx);
     });
 
-    let has_dirty = app_state.read(cx).has_dirty_documents(cx);
+    let has_dirty = window_state.read(cx).has_dirty_documents(cx);
 
     if has_dirty {
-        app_state.update(cx, |state, _| {
+        window_state.update(cx, |state, _| {
             state.is_closing_window = true;
         });
-        prompt_next_dirty_tab(app_state, window, cx);
+        prompt_next_dirty_tab(window_state, window, cx);
         false
     } else {
-        app_state.update(cx, |state, _| {
-            state.shared_vocabulary.borrow_mut().save();
-        });
+        window_state
+            .read(cx)
+            .app_state
+            .read(cx)
+            .save_vocabulary_on_close(cx);
         true
     }
 }
 
-pub fn prompt_next_dirty_tab(app_state: Entity<AppState>, window: &mut Window, cx: &mut App) {
-    let dirty_index = app_state.update(cx, |state, cx| {
+pub fn prompt_next_dirty_tab(window_state: Entity<WindowState>, window: &mut Window, cx: &mut App) {
+    let dirty_index = window_state.update(cx, |state, cx| {
         state.refresh_all_dirty_states(cx);
         state.documents.iter().position(|d| d.read(cx).dirty)
     });
 
     if let Some(index) = dirty_index {
-        app_state.update(cx, |state, cx| {
+        window_state.update(cx, |state, cx| {
             state.switch_to_tab(index, cx);
         });
-        show_save_dialog_for_tab(app_state, index, window, cx);
+        show_save_dialog_for_tab(window_state, index, window, cx);
     } else {
-        let is_closing = app_state.read(cx).is_closing_window;
+        let state = window_state.read(cx);
+        let (is_closing, quitting) = (state.is_closing_window, state.quit_after_close);
         if is_closing {
             window.remove_window();
+            // Quitting goes on to the other windows.
+            if quitting {
+                chrome::quit(cx);
+            }
         }
     }
 }
 
 fn show_save_dialog_for_tab(
-    app_state: Entity<AppState>,
+    window_state: Entity<WindowState>,
     index: usize,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let title = app_state
+    let title = window_state
         .read(cx)
         .documents
         .get(index)
@@ -101,7 +109,7 @@ fn show_save_dialog_for_tab(
         .unwrap_or_else(|| "Untitled".into());
 
     window.open_dialog(cx, move |dialog, _window, _cx| {
-        let app_state_cancel = app_state.clone();
+        let window_state_cancel = window_state.clone();
 
         dialog
             .title("Save changes?")
@@ -109,8 +117,8 @@ fn show_save_dialog_for_tab(
             .close_button(true)
             .keyboard(true)
             .on_cancel(move |_, _, cx| {
-                app_state_cancel.update(cx, |state, _| {
-                    state.is_closing_window = false;
+                window_state_cancel.update(cx, |state, _| {
+                    state.cancel_closing();
                 });
                 true
             })
@@ -120,15 +128,15 @@ fn show_save_dialog_for_tab(
                     .child(format!("Do you want to save changes to {}?", title)),
             )
             .footer({
-                let app_state_cancel_click = app_state.clone();
-                let app_state_discard_click = app_state.clone();
-                let app_state_save_click = app_state.clone();
+                let window_state_cancel_click = window_state.clone();
+                let window_state_discard_click = window_state.clone();
+                let window_state_save_click = window_state.clone();
 
                 DialogFooter::new()
                     .child(Button::new("cancel").outline().label("Cancel").on_click(
                         move |_, window, cx| {
-                            app_state_cancel_click.update(cx, |state, _| {
-                                state.is_closing_window = false;
+                            window_state_cancel_click.update(cx, |state, _| {
+                                state.cancel_closing();
                             });
                             window.close_dialog(cx);
                         },
@@ -139,13 +147,14 @@ fn show_save_dialog_for_tab(
                             .label("Don't Save")
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
-                                app_state_discard_click.update(cx, |state, cx| {
+                                window_state_discard_click.update(cx, |state, cx| {
                                     state.force_close_tab(index, window, cx);
                                 });
-                                let is_closing = app_state_discard_click.read(cx).is_closing_window;
+                                let is_closing =
+                                    window_state_discard_click.read(cx).is_closing_window;
                                 if is_closing {
                                     prompt_next_dirty_tab(
-                                        app_state_discard_click.clone(),
+                                        window_state_discard_click.clone(),
                                         window,
                                         cx,
                                     );
@@ -157,7 +166,7 @@ fn show_save_dialog_for_tab(
                             window.close_dialog(cx);
                             perform_save_and_close_tab(
                                 window,
-                                app_state_save_click.clone(),
+                                window_state_save_click.clone(),
                                 index,
                                 cx,
                             );
@@ -169,7 +178,7 @@ fn show_save_dialog_for_tab(
 
 fn perform_save_and_close_tab(
     window: &Window,
-    app_state: Entity<AppState>,
+    window_state: Entity<WindowState>,
     index: usize,
     cx: &App,
 ) {
@@ -177,7 +186,7 @@ fn perform_save_and_close_tab(
         .spawn(cx, async move |cx| {
             let doc_info = cx
                 .update(|_, cx| {
-                    app_state.update(cx, |state, cx| {
+                    window_state.update(cx, |state, cx| {
                         state.documents.get(index).cloned().map(|doc| {
                             let content = doc.read(cx).content(cx);
                             let path = doc.read(cx).path.clone();
@@ -190,8 +199,8 @@ fn perform_save_and_close_tab(
 
             let Some((doc, path, content)) = doc_info else {
                 cx.update(|_window, cx| {
-                    app_state.update(cx, |state, _cx| {
-                        state.is_closing_window = false;
+                    window_state.update(cx, |state, _cx| {
+                        state.cancel_closing();
                     });
                 })
                 .ok();
@@ -200,7 +209,7 @@ fn perform_save_and_close_tab(
 
             let saved_path = if let Some(existing_path) = path {
                 cx.update(|_, cx| {
-                    app_state.update(cx, |state, cx| {
+                    window_state.update(cx, |state, cx| {
                         if let Err(e) = state.perform_save(
                             doc.clone(),
                             existing_path.clone(),
@@ -231,7 +240,7 @@ fn perform_save_and_close_tab(
                         None
                     } else {
                         cx.update(|_, cx| {
-                            app_state.update(cx, |state, cx| {
+                            window_state.update(cx, |state, cx| {
                                 state.document_saved(doc.clone(), path.clone(), cx);
                             });
                         })
@@ -245,19 +254,19 @@ fn perform_save_and_close_tab(
 
             if saved_path.is_some() {
                 cx.update(|window, cx| {
-                    app_state.update(cx, |state, cx| {
+                    window_state.update(cx, |state, cx| {
                         state.force_close_tab(index, window, cx);
                     });
-                    let is_closing = app_state.read(cx).is_closing_window;
+                    let is_closing = window_state.read(cx).is_closing_window;
                     if is_closing {
-                        prompt_next_dirty_tab(app_state.clone(), window, cx);
+                        prompt_next_dirty_tab(window_state.clone(), window, cx);
                     }
                 })
                 .ok();
             } else {
                 cx.update(|_window, cx| {
-                    app_state.update(cx, |state, _cx| {
-                        state.is_closing_window = false;
+                    window_state.update(cx, |state, _cx| {
+                        state.cancel_closing();
                     });
                 })
                 .ok();

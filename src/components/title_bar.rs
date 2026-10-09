@@ -1,7 +1,7 @@
 //! Title bar containing the menus and the window controls.
 
 use crate::chrome;
-use crate::state::AppState;
+use crate::state::WindowState;
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, TitleBar, h_flex, menu::AppMenuBar};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
@@ -10,15 +10,15 @@ use gpui_kit::{
 };
 
 pub struct JotTitleBar {
-    app_state: Entity<AppState>,
+    window_state: Entity<WindowState>,
     /// The menus on Windows and Linux. macOS shows them in the menu bar.
     menu_bar: Entity<AppMenuBar>,
 }
 
 impl JotTitleBar {
-    pub fn new(app_state: Entity<AppState>, cx: &mut App) -> Self {
+    pub fn new(window_state: Entity<WindowState>, cx: &mut App) -> Self {
         Self {
-            app_state,
+            window_state,
             menu_bar: AppMenuBar::new(cx),
         }
     }
@@ -35,7 +35,7 @@ impl Render for JotTitleBar {
         _window: &mut Window,
         cx: &mut gpui_kit::Context<Self>,
     ) -> impl IntoElement {
-        let state = self.app_state.read(cx);
+        let state = self.window_state.read(cx);
 
         let (title_text, is_dirty) = if let Some(doc) = state.active_document() {
             let doc = doc.read(cx);

@@ -4,7 +4,8 @@ use crate::components::{
     Editor, JotTabBar, JotTitleBar, SettingsPanel, StatusBar, View, close_tab_with_prompt,
 };
 use crate::fonts;
-use crate::state::{AppEvent, AppState};
+use crate::launch::report_open_errors;
+use crate::state::{AppState, WindowState};
 use gpui_kit::component::{
     ActiveTheme, WindowExt,
     button::{Button, ButtonVariants},
@@ -15,9 +16,12 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use std::path::PathBuf;
 
+/// A jot window: its tabs and documents, and the settings page.
 pub struct JotApp {
     app_state: Entity<AppState>,
+    window_state: Entity<WindowState>,
     title_bar: Entity<JotTitleBar>,
     tab_bar: Entity<JotTabBar>,
     editor: Entity<Editor>,
@@ -29,11 +33,19 @@ pub struct JotApp {
 }
 
 impl JotApp {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let app_state = cx.new(AppState::new);
+    /// A window with the files at `paths` in its tabs, or a new document
+    /// without any.
+    pub fn new(
+        app_state: Entity<AppState>,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let window_state = cx.new(|cx| WindowState::new(app_state.clone(), window, cx));
         // A font named in the settings may have gone, such as a font file
-        // that was deleted. The editor then uses the default, and says so.
-        let missing_font = app_state.update(cx, |state, cx| state.use_an_available_editor_font(cx));
+        // that was deleted. The editor then uses the default, and the first
+        // window says so.
+        let missing_font = app_state.update(cx, |state, _| state.take_missing_font());
         if let Some(family) = missing_font {
             cx.defer_in(window, move |_, window, cx| {
                 window.push_notification(
@@ -48,26 +60,49 @@ impl JotApp {
 
         window.on_window_should_close(cx, chrome::can_close);
 
-        let event_subscription =
-            cx.subscribe_in(&app_state, window, |this, _, event, window, cx| {
-                this.handle_app_event(event, window, cx);
-            });
-
-        app_state.update(cx, |state, cx| {
-            state.new_untitled_document(window, cx);
+        // The View menu shows Word Wrap and Line Numbers.
+        let settings_subscription = cx.observe_in(&app_state, window, |this, app_state, _, cx| {
+            let settings = app_state.read(cx).settings.clone();
+            set_menus(&settings, cx);
+            this.title_bar
+                .update(cx, |title_bar, cx| title_bar.reload_menus(cx));
+        });
+        // Files from a later launch open in the window used last.
+        let handle = window.window_handle();
+        app_state.update(cx, |state, _| state.window_activated(handle));
+        let activation_subscription = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                let handle = window.window_handle();
+                this.app_state
+                    .update(cx, |state, _| state.window_activated(handle));
+            }
         });
 
-        let title_bar = cx.new(|cx| JotTitleBar::new(app_state.clone(), cx));
-        let tab_bar = cx.new(|_| JotTabBar::new(app_state.clone()));
-        let editor = cx.new(|cx| Editor::new(app_state.clone(), window, cx));
-        let status_bar = cx.new(|cx| StatusBar::new(app_state.clone(), cx));
-        let settings_panel = cx.new(|cx| SettingsPanel::new(app_state.clone(), window, cx));
+        let errors = window_state.update(cx, |state, cx| {
+            let errors = state.open_paths(paths, window, cx);
+            if state.documents.is_empty() {
+                state.new_untitled_document(window, cx);
+            }
+            errors
+        });
+        cx.defer_in(window, move |this, window, cx| {
+            report_open_errors(errors, window, cx);
+            this.focus_editor(window, cx);
+        });
+
+        let title_bar = cx.new(|cx| JotTitleBar::new(window_state.clone(), cx));
+        let tab_bar = cx.new(|_| JotTabBar::new(window_state.clone()));
+        let editor = cx.new(|cx| Editor::new(window_state.clone(), window, cx));
+        let status_bar = cx.new(|cx| StatusBar::new(window_state.clone(), cx));
+        let settings_panel =
+            cx.new(|cx| SettingsPanel::new(app_state.clone(), window_state.clone(), window, cx));
         let goto_line_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Line number..."));
         let focus_handle = cx.focus_handle();
 
         Self {
             app_state,
+            window_state,
             title_bar,
             tab_bar,
             editor,
@@ -75,25 +110,43 @@ impl JotApp {
             settings_panel,
             goto_line_input,
             focus_handle,
-            _subscriptions: vec![event_subscription],
+            _subscriptions: vec![settings_subscription, activation_subscription],
         }
     }
 
-    fn handle_app_event(&mut self, event: &AppEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if let AppEvent::SettingsChanged = event {
-            self.app_state.update(cx, |state, cx| {
-                state.apply_settings_to_all_docs(window, cx);
-            });
-            // The View menu shows Word Wrap and Line Numbers.
-            let settings = self.app_state.read(cx).settings.clone();
-            set_menus(&settings, cx);
-            self.title_bar
-                .update(cx, |title_bar, cx| title_bar.reload_menus(cx));
-        }
+    /// Opens the files at `paths` in tabs, and says why any couldn't be
+    /// opened.
+    pub fn open_paths(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+        let errors = self
+            .window_state
+            .update(cx, |state, cx| state.open_paths(paths, window, cx));
+        report_open_errors(errors, window, cx);
+        self.focus_editor(window, cx);
+    }
+
+    /// Shows the document in tab `index`.
+    pub fn show_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.window_state.update(cx, |state, cx| {
+            state.switch_to_tab(index, cx);
+            if state.current_view != View::Editor {
+                state.show_editor(cx);
+            }
+        });
+        self.focus_editor(window, cx);
+    }
+
+    /// Moves the keyboard focus to the active document, unless the
+    /// settings page is showing.
+    pub fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.window_state.update(cx, |state, cx| {
+            if state.current_view == View::Editor {
+                state.focus_active_editor(window, cx);
+            }
+        });
     }
 
     fn show_goto_line_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let app_state = self.app_state.clone();
+        let window_state = self.window_state.clone();
         let goto_line_input = self.goto_line_input.clone();
 
         goto_line_input.update(cx, |state, cx| {
@@ -102,12 +155,12 @@ impl JotApp {
 
         window.open_dialog(cx, move |dialog, _, _| {
             let go = {
-                let app_state = app_state.clone();
+                let window_state = window_state.clone();
                 let input = goto_line_input.clone();
                 move |window: &mut Window, cx: &mut App| {
                     let line_str = input.read(cx).value().to_string();
                     if let Ok(line) = line_str.trim().parse::<usize>() {
-                        app_state.update(cx, |state, cx| {
+                        window_state.update(cx, |state, cx| {
                             state.goto_line(line, window, cx);
                         });
                     }
@@ -143,7 +196,7 @@ impl JotApp {
             .update(cx, |state, cx| state.focus(window, cx));
     }
 
-    fn trigger_open_file(window: &Window, app_state: Entity<AppState>, cx: &App) {
+    fn trigger_open_file(window: &Window, window_state: Entity<WindowState>, cx: &App) {
         window
             .spawn(cx, async move |cx| {
                 let file = rfd::AsyncFileDialog::new()
@@ -159,17 +212,19 @@ impl JotApp {
                     let path = file.path().to_path_buf();
 
                     cx.update(|window, cx| {
-                        app_state.update(cx, |state, cx| {
-                            state.open_file(path, window, cx);
-                        });
+                        let opened =
+                            window_state.update(cx, |state, cx| state.open_file(path, window, cx));
+                        if let Err(error) = opened {
+                            report_open_errors(vec![error], window, cx);
+                        }
                     })
                     .ok();
 
-                    let app_state_clone = app_state.clone();
+                    let window_state_clone = window_state.clone();
                     cx.on_next_frame(move |_window, _cx| {
-                        let app_state_inner = app_state_clone.clone();
+                        let window_state_inner = window_state_clone.clone();
                         _window.on_next_frame(move |_window, cx| {
-                            app_state_inner.update(cx, |state, cx| {
+                            window_state_inner.update(cx, |state, cx| {
                                 if let Some(doc) = state.active_document() {
                                     let editor_state = doc.read(cx).editor_state.clone();
                                     editor_state.update(cx, |_, cx| {
@@ -184,7 +239,7 @@ impl JotApp {
             .detach();
     }
 
-    fn trigger_new_from_template(window: &Window, app_state: Entity<AppState>, cx: &App) {
+    fn trigger_new_from_template(window: &Window, window_state: Entity<WindowState>, cx: &App) {
         window
             .spawn(cx, async move |cx| {
                 let file = rfd::AsyncFileDialog::new()
@@ -201,17 +256,19 @@ impl JotApp {
                     let path = file.path().to_path_buf();
 
                     cx.update(|window, cx| {
-                        app_state.update(cx, |state, cx| {
-                            state.open_as_template(path, window, cx);
-                        });
+                        let opened = window_state
+                            .update(cx, |state, cx| state.open_as_template(path, window, cx));
+                        if let Err(error) = opened {
+                            report_open_errors(vec![error], window, cx);
+                        }
                     })
                     .ok();
 
-                    let app_state_clone = app_state.clone();
+                    let window_state_clone = window_state.clone();
                     cx.on_next_frame(move |_window, _cx| {
-                        let app_state_inner = app_state_clone.clone();
+                        let window_state_inner = window_state_clone.clone();
                         _window.on_next_frame(move |_window, cx| {
-                            app_state_inner.update(cx, |state, cx| {
+                            window_state_inner.update(cx, |state, cx| {
                                 if let Some(doc) = state.active_document() {
                                     let editor_state = doc.read(cx).editor_state.clone();
                                     editor_state.update(cx, |_, cx| {
@@ -226,12 +283,12 @@ impl JotApp {
             .detach();
     }
 
-    fn trigger_save_as(window: &Window, app_state: Entity<AppState>, cx: &App) {
+    fn trigger_save_as(window: &Window, window_state: Entity<WindowState>, cx: &App) {
         window
             .spawn(cx, async move |cx| {
                 let (doc, content) = cx
                     .update(|_, cx| {
-                        app_state.update(cx, |state, cx| {
+                        window_state.update(cx, |state, cx| {
                             if let Some(doc) = state.active_document().cloned() {
                                 let content = doc.read(cx).content(cx);
                                 (Some(doc), content)
@@ -259,7 +316,7 @@ impl JotApp {
                     }
 
                     cx.update(|_, cx| {
-                        app_state.update(cx, |state, cx| {
+                        window_state.update(cx, |state, cx| {
                             state.document_saved(doc, path, cx);
                         });
                     })
@@ -269,13 +326,13 @@ impl JotApp {
             .detach();
     }
 
-    pub fn app_state(&self) -> &Entity<AppState> {
-        &self.app_state
+    pub fn window_state(&self) -> &Entity<WindowState> {
+        &self.window_state
     }
 
     /// Opens the active document's find panel, or find and replace.
     fn open_search(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(doc) = self.app_state.read(cx).active_document() else {
+        let Some(doc) = self.window_state.read(cx).active_document() else {
             return;
         };
         let editor_state = doc.read(cx).editor_state.clone();
@@ -288,21 +345,21 @@ impl JotApp {
     fn bind_global_actions(&self, div: Div, cx: &mut Context<Self>) -> Div {
         div.key_context(APP_CONTEXT)
             .on_action(cx.listener(|this, action: &NewTab, window, cx| {
-                this.app_state.update(cx, |state, cx| {
+                this.window_state.update(cx, |state, cx| {
                     state.on_new_tab(action, window, cx);
                 });
             }))
             .on_action(cx.listener(|this, _: &NewFromTemplate, window, cx| {
-                Self::trigger_new_from_template(window, this.app_state.clone(), cx);
+                Self::trigger_new_from_template(window, this.window_state.clone(), cx);
             }))
             .on_action(cx.listener(|this, _: &OpenFile, window, cx| {
-                Self::trigger_open_file(window, this.app_state.clone(), cx);
+                Self::trigger_open_file(window, this.window_state.clone(), cx);
             }))
             .on_action(cx.listener(|this, _: &Save, window, cx| {
-                let app_state = this.app_state.clone();
+                let window_state = this.window_state.clone();
 
                 let needs_save_as =
-                    app_state.update(cx, |state, cx| match state.save_active_document(cx) {
+                    window_state.update(cx, |state, cx| match state.save_active_document(cx) {
                         Ok(saved) => !saved,
                         Err(e) => {
                             log::error!("Save failed: {}", e);
@@ -311,47 +368,40 @@ impl JotApp {
                     });
 
                 if needs_save_as {
-                    Self::trigger_save_as(window, app_state, cx);
+                    Self::trigger_save_as(window, window_state, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &SaveAs, window, cx| {
-                Self::trigger_save_as(window, this.app_state.clone(), cx);
+                Self::trigger_save_as(window, this.window_state.clone(), cx);
             }))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
-                let index = this.app_state.read(cx).active_index;
-                close_tab_with_prompt(this.app_state.clone(), index, window, cx);
+                let index = this.window_state.read(cx).active_index;
+                close_tab_with_prompt(this.window_state.clone(), index, window, cx);
             }))
             // Not a listener: the close check reads this view.
             .on_action(|_: &CloseWindow, window, cx| chrome::close_window(window, cx))
             .on_action(|_: &Minimize, window, _| window.minimize_window())
             .on_action(|_: &Zoom, window, _| window.zoom_window())
-            .on_action(cx.listener(|this, action: &ZoomIn, window, cx| {
-                this.app_state.update(cx, |state, cx| {
-                    state.on_zoom_in(action, window, cx);
-                });
+            // The settings are every window's: a change here reaches them all.
+            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| {
+                this.app_state.update(cx, |state, cx| state.zoom_in(cx));
             }))
-            .on_action(cx.listener(|this, action: &ZoomOut, window, cx| {
-                this.app_state.update(cx, |state, cx| {
-                    state.on_zoom_out(action, window, cx);
-                });
+            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| {
+                this.app_state.update(cx, |state, cx| state.zoom_out(cx));
             }))
-            .on_action(cx.listener(|this, action: &ResetZoom, window, cx| {
-                this.app_state.update(cx, |state, cx| {
-                    state.on_reset_zoom(action, window, cx);
-                });
+            .on_action(cx.listener(|this, _: &ResetZoom, _, cx| {
+                this.app_state.update(cx, |state, cx| state.reset_zoom(cx));
             }))
-            .on_action(cx.listener(|this, action: &ToggleWordWrap, window, cx| {
-                this.app_state.update(cx, |state, cx| {
-                    state.on_toggle_word_wrap(action, window, cx);
-                });
+            .on_action(cx.listener(|this, _: &ToggleWordWrap, _, cx| {
+                this.app_state
+                    .update(cx, |state, cx| state.toggle_word_wrap(cx));
             }))
-            .on_action(cx.listener(|this, action: &ToggleLineNumbers, window, cx| {
-                this.app_state.update(cx, |state, cx| {
-                    state.on_toggle_line_numbers(action, window, cx);
-                });
+            .on_action(cx.listener(|this, _: &ToggleLineNumbers, _, cx| {
+                this.app_state
+                    .update(cx, |state, cx| state.toggle_line_numbers(cx));
             }))
             .on_action(cx.listener(|this, action: &OpenSettings, window, cx| {
-                this.app_state.update(cx, |state, cx| {
+                this.window_state.update(cx, |state, cx| {
                     state.on_open_settings(action, window, cx);
                 });
             }))
@@ -368,12 +418,12 @@ impl JotApp {
                 this.show_goto_line_dialog(window, cx);
             }))
             .on_action(cx.listener(|this, action: &NextTab, window, cx| {
-                this.app_state.update(cx, |state, cx| {
+                this.window_state.update(cx, |state, cx| {
                     state.on_next_tab(action, window, cx);
                 });
             }))
             .on_action(cx.listener(|this, action: &PreviousTab, window, cx| {
-                this.app_state.update(cx, |state, cx| {
+                this.window_state.update(cx, |state, cx| {
                     state.on_previous_tab(action, window, cx);
                 });
             }))
@@ -388,7 +438,7 @@ impl Focusable for JotApp {
 
 impl Render for JotApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let current_view = self.app_state.read(cx).current_view;
+        let current_view = self.window_state.read(cx).current_view;
 
         v_flex()
             .id("jot-app")

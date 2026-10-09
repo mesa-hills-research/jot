@@ -3,8 +3,8 @@
 //! macOS shows the menus in the system menu bar. Windows and Linux show them
 //! in the title bar, through GPUI Kit's `AppMenuBar`.
 
-use crate::chrome;
 use crate::state::Settings;
+use crate::{chrome, launch};
 use gpui_kit::component::{GlobalState, input};
 use gpui_kit::*;
 
@@ -45,6 +45,11 @@ pub const APP_CONTEXT: &str = "Jot";
 /// editor's own, with its own bindings.
 pub fn init(settings: &Settings, cx: &mut App) {
     cx.on_action(|_: &Quit, cx| chrome::quit(cx));
+    cx.on_action(|_: &NewWindow, cx| {
+        cx.defer(|cx| {
+            launch::open_window(Vec::new(), cx);
+        })
+    });
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());

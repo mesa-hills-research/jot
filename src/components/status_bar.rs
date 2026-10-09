@@ -1,6 +1,6 @@
 //! Status bar at the bottom of the window.
 
-use crate::state::{AppEvent, AppState};
+use crate::state::{WindowEvent, WindowState};
 use gpui_kit::component::{ActiveTheme, h_flex};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
@@ -10,24 +10,26 @@ use gpui_kit::{
 
 /// Status bar showing cursor position, zoom level, etc.
 pub struct StatusBar {
-    app_state: Entity<AppState>,
+    window_state: Entity<WindowState>,
     /// Redraws when the active document's caret or keybinding mode changes.
     active_editor: Option<Subscription>,
     _app_subscription: Subscription,
 }
 
 impl StatusBar {
-    pub fn new(app_state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
-        let app_subscription = cx.subscribe(&app_state, |this, _, event, cx| {
+    pub fn new(window_state: Entity<WindowState>, cx: &mut Context<Self>) -> Self {
+        let app_subscription = cx.subscribe(&window_state, |this, _, event, cx| {
             if matches!(
                 event,
-                AppEvent::ActiveTabChanged(_) | AppEvent::TabAdded(_) | AppEvent::TabRemoved(_)
+                WindowEvent::ActiveTabChanged(_)
+                    | WindowEvent::TabAdded(_)
+                    | WindowEvent::TabRemoved(_)
             ) {
                 this.observe_active_editor(cx);
             }
         });
         let mut status_bar = Self {
-            app_state,
+            window_state,
             active_editor: None,
             _app_subscription: app_subscription,
         };
@@ -37,7 +39,7 @@ impl StatusBar {
 
     fn observe_active_editor(&mut self, cx: &mut Context<Self>) {
         let editor_state = self
-            .app_state
+            .window_state
             .read(cx)
             .active_document()
             .map(|doc| doc.read(cx).editor_state.clone());
@@ -53,8 +55,8 @@ impl Render for StatusBar {
         _window: &mut Window,
         cx: &mut gpui_kit::Context<Self>,
     ) -> impl IntoElement {
-        let state = self.app_state.read(cx);
-        let settings = &state.settings;
+        let state = self.window_state.read(cx);
+        let settings = state.settings(cx);
 
         let (cursor_info, mode) = if let Some(doc) = state.active_document() {
             let editor = doc.read(cx).editor_state.read(cx);

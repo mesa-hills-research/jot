@@ -1,10 +1,10 @@
 use crate::autocomplete::AutocompleteMode;
 use crate::fonts;
-use crate::state::{AppState, ZOOM_LEVELS};
+use crate::state::{AppState, WindowState, ZOOM_LEVELS};
 use gpui_kit::component::{
     ActiveTheme, IconName, WindowExt,
     button::{Button, ButtonVariants, Toggle, ToggleGroup, ToggleVariants},
-    font_picker::{FontPicker, FontPickerEvent, FontPickerState},
+    font_picker::{FontPicker, FontPickerEvent, FontPickerState, FontSettings},
     h_flex,
     input::Keymap,
     notification::Notification,
@@ -50,19 +50,29 @@ const PAGE_WIDTH: f32 = 720.;
 /// The width of the dropdowns at the end of the rows, so that they line up.
 const SELECT_WIDTH: f32 = 240.;
 
+/// The settings page. The settings are every window's, so a change on one
+/// window's page shows on the others' too.
 pub struct SettingsPanel {
     app_state: Entity<AppState>,
+    window_state: Entity<WindowState>,
     theme_select: Entity<SelectState<SearchableVec<SharedString>>>,
     /// The theme names the theme menu lists.
     theme_names: Vec<SharedString>,
     zoom_select: Entity<SelectState<Vec<ZoomItem>>>,
     font_picker: Entity<FontPickerState>,
+    /// The font the font picker was last given from the settings.
+    picker_font: FontSettings,
     scroll_handle: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
 impl SettingsPanel {
-    pub fn new(app_state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        app_state: Entity<AppState>,
+        window_state: Entity<WindowState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let theme_names = Self::get_theme_names(cx);
         let current_theme = app_state.read(cx).settings.theme.clone();
 
@@ -78,25 +88,8 @@ impl SettingsPanel {
             let app_state = app_state.clone();
             move |_, _, event, cx| {
                 if let SelectEvent::Confirm(Some(theme)) = event {
-                    let theme_name = theme.clone();
-
-                    if let Some(theme_config) = gpui_kit::component::ThemeRegistry::global(cx)
-                        .themes()
-                        .get(&theme_name)
-                        .cloned()
-                    {
-                        // `update` also rebuilds the Base layer's copy of the
-                        // theme, which draws the scrollbars.
-                        gpui_kit::component::Theme::update(cx, |theme| {
-                            theme.apply_config(&theme_config)
-                        });
-                    }
-
-                    app_state.update(cx, |state, cx| {
-                        state.settings.theme = theme_name;
-                        state.settings.save();
-                        cx.notify();
-                    });
+                    let theme = theme.clone();
+                    app_state.update(cx, |state, cx| state.set_theme(theme, cx));
                 }
             }
         });
@@ -123,7 +116,7 @@ impl SettingsPanel {
             FontPickerState::new(window, cx)
                 .app_fonts(fonts::bundled_fonts())
                 .added_fonts(fonts::user_fonts())
-                .default_settings(editor_font)
+                .default_settings(editor_font.clone())
         });
         let font_subscription = cx.subscribe(&font_picker, {
             let app_state = app_state.clone();
@@ -137,10 +130,12 @@ impl SettingsPanel {
 
         Self {
             app_state,
+            window_state,
             theme_select,
             theme_names,
             zoom_select,
             font_picker,
+            picker_font: editor_font,
             scroll_handle: ScrollHandle::new(),
             _subscriptions: vec![subscription, zoom_subscription, font_subscription],
         }
@@ -194,11 +189,21 @@ impl SettingsPanel {
         theme_names
     }
 
-    /// Shows the current theme and zoom in their menus. Both can change
-    /// elsewhere: themes load from files, and the View menu zooms.
+    /// Shows the current theme, zoom and font in their controls. They can
+    /// change elsewhere: themes load from files, the View menu zooms, and
+    /// other windows have settings pages too.
     fn sync_selects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let settings = &self.app_state.read(cx).settings;
-        let (theme, zoom) = (settings.theme.clone(), settings.zoom_level);
+        let (theme, zoom, font) = (
+            settings.theme.clone(),
+            settings.zoom_level,
+            settings.editor_font.clone(),
+        );
+        if font != self.picker_font {
+            self.picker_font = font.clone();
+            self.font_picker
+                .update(cx, |picker, cx| picker.set_settings(font, window, cx));
+        }
         let theme_names = Self::get_theme_names(cx);
         let themes_changed = theme_names != self.theme_names;
         if themes_changed {
@@ -350,9 +355,9 @@ impl Render for SettingsPanel {
                     .icon(IconName::Close)
                     .tooltip("Close Settings")
                     .on_click({
-                        let app_state = self.app_state.clone();
+                        let window_state = self.window_state.clone();
                         move |_, window, cx| {
-                            app_state.update(cx, |state, cx| {
+                            window_state.update(cx, |state, cx| {
                                 state.show_editor(cx);
                                 // Typing and shortcuts go to the document again.
                                 state.focus_active_editor(window, cx);

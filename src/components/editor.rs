@@ -1,4 +1,4 @@
-use crate::state::{AppEvent, AppState};
+use crate::state::{WindowEvent, WindowState};
 use gpui_kit::component::{
     ActiveTheme,
     input::{InputEvent, Position, TextEditor, TextareaState},
@@ -13,37 +13,41 @@ const VOID_ELEMENTS: &[&str] = &[
 ];
 
 pub struct Editor {
-    app_state: Entity<AppState>,
+    window_state: Entity<WindowState>,
     active_doc_subscription: Option<Subscription>,
     _app_subscriptions: Vec<Subscription>,
     last_text_len: usize,
 }
 
 impl Editor {
-    pub fn new(app_state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        window_state: Entity<WindowState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut editor = Self {
-            app_state: app_state.clone(),
+            window_state: window_state.clone(),
             active_doc_subscription: None,
             _app_subscriptions: Vec::new(),
             last_text_len: 0,
         };
 
-        editor.subscribe_to_app(app_state, window, cx);
+        editor.subscribe_to_app(window_state, window, cx);
         editor.update_active_document_subscription(window, cx);
         editor
     }
 
     fn subscribe_to_app(
         &mut self,
-        app_state: Entity<AppState>,
+        window_state: Entity<WindowState>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let sub = cx.subscribe_in(
-            &app_state,
+            &window_state,
             window,
             |this, _, event, window, cx| match event {
-                AppEvent::ActiveTabChanged(_) | AppEvent::TabAdded(_) => {
+                WindowEvent::ActiveTabChanged(_) | WindowEvent::TabAdded(_) => {
                     this.update_active_document_subscription(window, cx);
                 }
                 _ => {}
@@ -55,10 +59,10 @@ impl Editor {
     fn update_active_document_subscription(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.active_doc_subscription = None;
 
-        let state = self.app_state.read(cx);
+        let state = self.window_state.read(cx);
         if let Some(doc) = state.active_document() {
             let editor_state = doc.read(cx).editor_state.clone();
-            let app_state = self.app_state.clone();
+            let window_state = self.window_state.clone();
 
             self.last_text_len = editor_state.read(cx).text().len();
 
@@ -67,7 +71,7 @@ impl Editor {
                 window,
                 move |this, editor_state, event, window, cx| {
                     if let InputEvent::Change = event {
-                        this.handle_text_change(editor_state, &app_state, window, cx);
+                        this.handle_text_change(editor_state, &window_state, window, cx);
                     }
                 },
             ));
@@ -77,11 +81,11 @@ impl Editor {
     fn handle_text_change(
         &mut self,
         editor_state: &Entity<TextareaState>,
-        app_state: &Entity<AppState>,
+        window_state: &Entity<WindowState>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let xml_enabled = app_state.read(cx).settings.xml_auto_complete;
+        let xml_enabled = window_state.read(cx).settings(cx).xml_auto_complete;
 
         let (current_text, cursor, current_len, cursor_pos) = {
             let state = editor_state.read(cx);
@@ -97,8 +101,8 @@ impl Editor {
         self.last_text_len = current_len;
 
         {
-            let app_state = app_state.clone();
-            app_state.update(cx, |state, cx| {
+            let window_state = window_state.clone();
+            window_state.update(cx, |state, cx| {
                 if let Some(doc) = state.active_document().cloned() {
                     doc.update(cx, |doc, cx| {
                         doc.check_dirty(cx);
@@ -214,8 +218,8 @@ impl Editor {
 impl Render for Editor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (font, font_size, line_height, document) = {
-            let state = self.app_state.read(cx);
-            let settings = &state.settings;
+            let state = self.window_state.read(cx);
+            let settings = state.settings(cx);
             (
                 settings.editor_font.font(),
                 settings.effective_font_size(),

@@ -4,7 +4,7 @@ use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::Keymap;
 use gpui_kit::{SharedString, px};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const ZOOM_LEVELS: &[u32] = &[50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300];
 
@@ -59,7 +59,8 @@ impl Default for Settings {
 }
 
 impl Settings {
-    fn config_path() -> Option<PathBuf> {
+    /// Where jot keeps its settings.
+    pub fn config_path() -> Option<PathBuf> {
         dirs::config_dir().map(|p| p.join("jot").join("settings.json"))
     }
 
@@ -87,17 +88,13 @@ impl Settings {
         Some(settings)
     }
 
-    pub fn save(&self) {
-        let Some(path) = Self::config_path() else {
-            return;
-        };
-
+    pub fn save_to(&self, path: &Path) {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
 
         if let Ok(content) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(&path, content);
+            let _ = std::fs::write(path, content);
         }
     }
 

@@ -1,11 +1,11 @@
-//! The main window's options and the one close check.
+//! The windows' options, the one close check, and quitting.
 
-use crate::app::JotApp;
 use crate::components::attempt_close_window;
-use gpui_kit::component::{Root, TitleBar};
+use crate::launch::jot_app;
+use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
-/// The main window: a transparent title bar that jot draws itself, with the
+/// A jot window: a transparent title bar that jot draws itself, with the
 /// macOS traffic lights at (9, 9) and the drag left to the app, as GPUI Kit's
 /// `TitleBar` expects.
 pub fn window_options(cx: &App) -> WindowOptions {
@@ -40,13 +40,12 @@ pub fn window_options(cx: &App) -> WindowOptions {
 /// With unsaved changes it asks about each document, returns `false`, and
 /// removes the window once the user has answered.
 pub fn can_close(window: &mut Window, cx: &mut App) -> bool {
-    let app = Root::read(window, cx).view().clone().downcast::<JotApp>();
-    match app {
-        Ok(app) => {
-            let app_state = app.read(cx).app_state().clone();
-            attempt_close_window(app_state, window, cx)
+    match jot_app(window, cx) {
+        Some(app) => {
+            let window_state = app.read(cx).window_state().clone();
+            attempt_close_window(window_state, window, cx)
         }
-        Err(_) => true,
+        None => true,
     }
 }
 
@@ -58,18 +57,30 @@ pub fn close_window(window: &mut Window, cx: &mut App) {
     }
 }
 
-/// Quits once every window agrees to close. A window that asks about unsaved
-/// changes closes itself afterwards, and jot quits with its last window.
+/// Quits once every window agrees to close. A window with unsaved changes
+/// comes to the front and asks about them. Once it has closed, quitting goes
+/// on to the next window, and Cancel stops it.
 pub fn quit(cx: &mut App) {
     // Deferred, so the window that sent Quit is free to answer too.
     cx.defer(|cx| {
-        let all_agree = cx.windows().into_iter().all(|window| {
-            window
-                .update(cx, |_, window, cx| can_close(window, cx))
-                .unwrap_or(true)
-        });
-        if all_agree {
-            cx.quit();
+        for handle in cx.windows() {
+            let agrees = handle
+                .update(cx, |_, window, cx| {
+                    if can_close(window, cx) {
+                        return true;
+                    }
+                    if let Some(app) = jot_app(window, cx) {
+                        let window_state = app.read(cx).window_state().clone();
+                        window_state.update(cx, |state, _| state.quit_after_close = true);
+                    }
+                    window.activate_window();
+                    false
+                })
+                .unwrap_or(true);
+            if !agrees {
+                return;
+            }
         }
+        cx.quit();
     });
 }
