@@ -9,6 +9,7 @@ mod actions;
 mod app;
 mod assets;
 mod autocomplete;
+mod chrome;
 mod components;
 mod spell;
 mod spell_editor;
@@ -17,7 +18,7 @@ mod theme;
 
 use app::JotApp;
 use assets::Assets;
-use gpui_kit::component::{Theme, ThemeRegistry, TitleBar};
+use gpui_kit::component::{Theme, ThemeRegistry};
 use gpui_kit::*;
 use state::Settings;
 
@@ -35,22 +36,7 @@ fn main() {
         let settings = Settings::load();
         load_themes(cx, &settings.theme);
 
-        let mut window_size = size(px(1000.0), px(700.0));
-        if let Some(display) = cx.primary_display() {
-            let display_size = display.bounds().size;
-            window_size.width = window_size.width.min(display_size.width * 0.85);
-            window_size.height = window_size.height.min(display_size.height * 0.85);
-        }
-
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(window_size, cx)),
-            titlebar: Some(TitleBar::title_bar_options()),
-            window_min_size: Some(size(px(400.), px(300.))),
-            kind: WindowKind::Normal,
-            ..Default::default()
-        };
-
-        gpui_kit::open_window(options, cx, |window, cx| {
+        gpui_kit::open_window(chrome::window_options(cx), cx, |window, cx| {
             cx.new(|cx| JotApp::new(window, cx))
         })
         .expect("Failed to open window");

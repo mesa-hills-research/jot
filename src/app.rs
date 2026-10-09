@@ -1,7 +1,7 @@
 use crate::actions::*;
+use crate::chrome;
 use crate::components::{
-    Editor, JotTabBar, JotTitleBar, MenuBar, SettingsPanel, StatusBar, View, attempt_close_window,
-    close_tab_with_prompt,
+    Editor, JotTabBar, JotTitleBar, MenuBar, SettingsPanel, StatusBar, View, close_tab_with_prompt,
 };
 use crate::state::{AppEvent, AppState};
 use gpui_kit::component::{
@@ -30,10 +30,7 @@ impl JotApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let app_state = cx.new(|cx| AppState::new(cx));
 
-        let app_state_clone = app_state.clone();
-        window.on_window_should_close(cx, move |window, cx| {
-            attempt_close_window(app_state_clone.clone(), window, cx)
-        });
+        window.on_window_should_close(cx, chrome::can_close);
 
         let event_subscription =
             cx.subscribe_in(&app_state, window, |this, _, event, window, cx| {
@@ -239,6 +236,10 @@ impl JotApp {
             .detach();
     }
 
+    pub fn app_state(&self) -> &Entity<AppState> {
+        &self.app_state
+    }
+
     /// Opens the active document's find panel, or find and replace.
     fn open_search(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(doc) = self.app_state.read(cx).active_document() else {
@@ -287,16 +288,8 @@ impl JotApp {
                 let index = this.app_state.read(cx).active_index;
                 close_tab_with_prompt(this.app_state.clone(), index, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                if attempt_close_window(this.app_state.clone(), window, cx) {
-                    window.remove_window();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &Quit, window, cx| {
-                if attempt_close_window(this.app_state.clone(), window, cx) {
-                    window.remove_window();
-                }
-            }))
+            // Not a listener: the close check reads this view.
+            .on_action(|_: &CloseWindow, window, cx| chrome::close_window(window, cx))
             .on_action(cx.listener(|this, action: &ZoomIn, window, cx| {
                 this.app_state.update(cx, |state, cx| {
                     state.on_zoom_in(action, window, cx);

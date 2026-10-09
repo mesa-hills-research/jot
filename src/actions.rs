@@ -1,5 +1,6 @@
 //! Global actions and keybindings for Jot.
 
+use crate::chrome;
 use gpui_kit::{App, KeyBinding, actions};
 
 actions!(
@@ -40,6 +41,8 @@ pub const APP_CONTEXT: &str = "Jot";
 
 /// Initialize all keybindings for the application.
 pub fn init(cx: &mut App) {
+    cx.on_action(|_: &Quit, cx| chrome::quit(cx));
+
     #[cfg(target_os = "macos")]
     let bindings = vec![
         KeyBinding::new("cmd-t", NewTab, Some(APP_CONTEXT)),
@@ -49,7 +52,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-s", Save, Some(APP_CONTEXT)),
         KeyBinding::new("cmd-shift-s", SaveAs, Some(APP_CONTEXT)),
         KeyBinding::new("cmd-w", CloseTab, Some(APP_CONTEXT)),
-        KeyBinding::new("cmd-q", Quit, Some(APP_CONTEXT)),
+        KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-z", Undo, Some(EDITOR_CONTEXT)),
         KeyBinding::new("cmd-shift-z", Redo, Some(EDITOR_CONTEXT)),
         KeyBinding::new("cmd-y", Redo, Some(EDITOR_CONTEXT)),
@@ -78,8 +81,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-s", Save, Some(APP_CONTEXT)),
         KeyBinding::new("ctrl-shift-s", SaveAs, Some(APP_CONTEXT)),
         KeyBinding::new("ctrl-w", CloseTab, Some(APP_CONTEXT)),
-        KeyBinding::new("alt-f4", CloseWindow, Some(APP_CONTEXT)),
-        KeyBinding::new("ctrl-q", Quit, Some(APP_CONTEXT)),
+        // Alt+F4 closes the window through the system, which runs the close check.
+        KeyBinding::new("ctrl-q", Quit, None),
         KeyBinding::new("ctrl-z", Undo, Some(EDITOR_CONTEXT)),
         KeyBinding::new("ctrl-shift-z", Redo, Some(EDITOR_CONTEXT)),
         KeyBinding::new("ctrl-y", Redo, Some(EDITOR_CONTEXT)),
