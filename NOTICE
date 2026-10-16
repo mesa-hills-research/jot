@@ -7,12 +7,15 @@ Version 2.0 (LICENSE-APACHE), at your option.
 jot bundles the third-party files below, each under its own license.
 
 
-JetBrains Mono (fonts/JetBrainsMono-Regular.ttf)
+JetBrains Mono 2.304, variable, upright and italic
+  Embedded through GPUI Kit's `fonts` feature (crates/assets/fonts/jetbrains-mono)
   Copyright 2020 The JetBrains Mono Project Authors
   (https://github.com/JetBrains/JetBrainsMono)
   SIL Open Font License 1.1, in fonts/OFL-JetBrainsMono.txt
 
-Work Sans (fonts/WorkSans-Regular.ttf)
+Work Sans, variable, upright and italic
+  Embedded through GPUI Kit's `fonts` feature (crates/assets/fonts/work-sans),
+  from Google Fonts (Work Sans repository commit b35c810)
   Copyright 2019 The Work Sans Project Authors
   (https://github.com/weiweihuanghuang/Work-Sans)
   SIL Open Font License 1.1, in fonts/OFL-WorkSans.txt

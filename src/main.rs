@@ -85,7 +85,7 @@ fn main() {
         // running, as Mac apps do, until Quit.
         cx.set_quit_mode(QuitMode::Default);
         fonts::register_fonts(cx);
-        fonts::keep_mono_font(cx);
+        fonts::apply_app_fonts(cx);
         let app_state = AppState::init(cx);
         let settings = app_state.read(cx).settings.clone();
         actions::init(&settings, cx);

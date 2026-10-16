@@ -457,7 +457,6 @@ impl Render for JotApp {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .font_family(fonts::UI_FONT)
             .child(
                 self.bind_global_actions(div(), cx)
                     .child(self.title_bar.clone()),
