@@ -1,7 +1,7 @@
-use crate::autocomplete::AutocompleteMode;
 use crate::fonts::DEFAULT_EDITOR_FONT;
 use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::Keymap;
+use gpui_kit::writing::SuggestionMode;
 use gpui_kit::{SharedString, px};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ pub struct Settings {
     /// How eagerly word suggestions show: `off`, `quiet` or `eager`. Files
     /// written when this was a switch hold `true` for Quiet or `false` for
     /// Off.
-    pub autocomplete: AutocompleteMode,
+    pub autocomplete: SuggestionMode,
     pub spell_check: bool,
     pub tab_size: u32,
     pub restore_session: bool,
@@ -47,7 +47,7 @@ impl Default for Settings {
             word_wrap: false,
             line_numbers: true,
             xml_auto_complete: false,
-            autocomplete: AutocompleteMode::Quiet,
+            autocomplete: SuggestionMode::Quiet,
             spell_check: true,
             tab_size: 4,
             restore_session: false,
@@ -145,7 +145,7 @@ mod tests {
         let settings = Settings::from_json(old).unwrap();
         assert_eq!(settings.theme, "Gruvbox Dark");
         assert!(settings.spell_check);
-        assert_eq!(settings.autocomplete, AutocompleteMode::Quiet);
+        assert_eq!(settings.autocomplete, SuggestionMode::Quiet);
         assert_eq!(settings.keymap, Keymap::Cua);
         assert!(!settings.smooth_caret);
         // The family and size become the editor font.
@@ -188,23 +188,23 @@ mod tests {
             let json = format!(r#"{{"theme": "Alduin", "autocomplete": {autocomplete}}}"#);
             Settings::from_json(&json).unwrap().autocomplete
         };
-        assert_eq!(load("true"), AutocompleteMode::Quiet);
-        assert_eq!(load("false"), AutocompleteMode::Off);
-        assert_eq!(load(r#""off""#), AutocompleteMode::Off);
-        assert_eq!(load(r#""quiet""#), AutocompleteMode::Quiet);
-        assert_eq!(load(r#""eager""#), AutocompleteMode::Eager);
+        assert_eq!(load("true"), SuggestionMode::Quiet);
+        assert_eq!(load("false"), SuggestionMode::Off);
+        assert_eq!(load(r#""off""#), SuggestionMode::Off);
+        assert_eq!(load(r#""quiet""#), SuggestionMode::Quiet);
+        assert_eq!(load(r#""eager""#), SuggestionMode::Eager);
         assert_eq!(
             Settings::from_json("{}").unwrap().autocomplete,
-            AutocompleteMode::Quiet
+            SuggestionMode::Quiet
         );
     }
 
     #[test]
     fn autocomplete_mode_round_trips() {
         for mode in [
-            AutocompleteMode::Off,
-            AutocompleteMode::Quiet,
-            AutocompleteMode::Eager,
+            SuggestionMode::Off,
+            SuggestionMode::Quiet,
+            SuggestionMode::Eager,
         ] {
             let settings = Settings {
                 autocomplete: mode,

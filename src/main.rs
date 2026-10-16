@@ -9,13 +9,11 @@ mod actions;
 mod app;
 mod args;
 mod assets;
-mod autocomplete;
 mod chrome;
 mod components;
 mod fonts;
 mod instance;
 mod launch;
-mod spell;
 mod state;
 mod theme;
 // Windows only. Its parts without Win32 calls build for tests everywhere.

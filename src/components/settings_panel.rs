@@ -1,4 +1,3 @@
-use crate::autocomplete::AutocompleteMode;
 use crate::fonts;
 use crate::state::{AppState, WindowState, ZOOM_LEVELS};
 use gpui_kit::component::{
@@ -13,6 +12,7 @@ use gpui_kit::component::{
     switch::Switch,
     v_flex,
 };
+use gpui_kit::writing::SuggestionMode;
 use gpui_kit::{
     AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
@@ -28,10 +28,10 @@ const KEYMAPS: [(Keymap, &str); 3] = [
 ];
 
 /// How eagerly word suggestions show, as the settings page names them.
-const AUTOCOMPLETE_MODES: [(AutocompleteMode, &str); 3] = [
-    (AutocompleteMode::Off, "Off"),
-    (AutocompleteMode::Quiet, "Quiet"),
-    (AutocompleteMode::Eager, "Eager"),
+const AUTOCOMPLETE_MODES: [(SuggestionMode, &str); 3] = [
+    (SuggestionMode::Off, "Off"),
+    (SuggestionMode::Quiet, "Quiet"),
+    (SuggestionMode::Eager, "Eager"),
 ];
 
 /// What the word suggestions row says about them, with the platform's key

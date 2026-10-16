@@ -4,10 +4,10 @@
 // in place of the built-in one.
 use super::{Launch, handle, jot_app, new_document, open_window};
 use crate::actions::{NewTab, NewWindow, ToggleLineNumbers};
-use crate::autocomplete::SharedVocabulary;
 use crate::chrome;
 use crate::state::{AppState, Settings, WindowState};
 use gpui_kit::component::input::{Keymap, TextareaState};
+use gpui_kit::writing::Writing;
 use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, TestAppContext};
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ fn start(cx: &mut TestAppContext) -> Entity<AppState> {
     cx.update(|cx| {
         gpui_kit::init(cx);
         let settings = Settings::default();
-        let app_state = AppState::init_for_test(settings.clone(), SharedVocabulary::new(), cx);
+        let app_state = AppState::init_for_test(settings.clone(), Writing::in_memory(), cx);
         crate::actions::init(&settings, cx);
         app_state
     })

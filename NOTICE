@@ -36,7 +36,7 @@ Color themes (themes/)
   Apache License 2.0, in LICENSE-APACHE
   Each file names the author of its color scheme and links to the source.
 
-English word list (assets/dict/en.txt)
+English word list (built in from GPUI Kit's gpui-kit-writing crate)
   From SCOWL (Spell Checker Oriented Word Lists) by Kevin Atkinson
   (http://wordlist.aspell.net/)
   The American English list up to size 70, as Debian packages it in

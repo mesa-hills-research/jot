@@ -135,8 +135,7 @@ impl WindowState {
             spell_check: settings.spell_check,
             keymap: settings.keymap,
             smooth_caret: settings.smooth_caret,
-            shared_vocab: app_state.shared_vocabulary.clone(),
-            suggestion_pacing: app_state.suggestion_pacing.clone(),
+            writing: app_state.writing.clone(),
         }
     }
 

@@ -1,10 +1,7 @@
-use crate::autocomplete::{JotCompletionProvider, SharedVocabulary, SuggestionPacing};
-use crate::spell::DocumentSpelling;
-use gpui_kit::component::input::{Keymap, SuggestionEvent, SuggestionOptions, TextareaState};
+use gpui_kit::component::input::{Keymap, SuggestionOptions, TextareaState};
+use gpui_kit::writing::Writing;
 use gpui_kit::{AppContext, Context, Entity, SharedString, Subscription, Window};
-use std::cell::RefCell;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 /// How a new document's editor starts out, from the settings.
 #[derive(Clone)]
@@ -14,10 +11,9 @@ pub struct EditorOptions {
     pub spell_check: bool,
     pub keymap: Keymap,
     pub smooth_caret: bool,
-    pub shared_vocab: Rc<RefCell<SharedVocabulary>>,
-    /// The word suggestions' mode, and how the user has been answering
-    /// them, shared by every document.
-    pub suggestion_pacing: Rc<SuggestionPacing>,
+    /// The spelling dictionary and the word suggestions' vocabulary and
+    /// pacing, shared by every document.
+    pub writing: Writing,
 }
 
 pub struct Document {
@@ -95,22 +91,21 @@ impl Document {
     }
 
     /// Builds the editor state for a document: GPUI Kit's text editor, with
-    /// jot's spell checker and word suggestions shown as ghost text. The
-    /// subscription tells the suggestions when Tab takes one or Escape
-    /// closes it.
+    /// the writing aids' spell checker and word suggestions shown as ghost
+    /// text. The subscription tells the suggestions when Tab takes one or
+    /// Escape closes it.
+    ///
+    /// The spell checker finds nothing misspelled until the dictionary has
+    /// loaded, and checks again then.
     fn build_editor_state(
         content: Option<String>,
         options: &EditorOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (Entity<TextareaState>, Subscription) {
-        let dictionary = options.shared_vocab.borrow().dictionary();
-        let completions = Rc::new(JotCompletionProvider::new(
-            options.shared_vocab.clone(),
-            options.suggestion_pacing.clone(),
-        ));
+        let suggestions = options.writing.word_suggestions();
         if let Some(content) = &content {
-            completions.opened_with(content);
+            suggestions.opened_with(content);
         }
         let editor_state = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
@@ -119,21 +114,16 @@ impl Document {
                 .line_number(options.line_numbers)
                 .keymap(options.keymap)
                 .smooth_caret(options.smooth_caret)
-                .suggestion_provider(completions.clone())
+                .spell_checker(options.writing.spell_checker())
+                .suggestion_provider(suggestions.clone())
                 .suggestion_options(SuggestionOptions::default().menu(false).inline(true));
-            if dictionary.is_loaded() {
-                state = state.spell_checker(Rc::new(DocumentSpelling::new(dictionary)));
-            }
             if let Some(content) = content {
                 state = state.default_value(content);
             }
             state.set_spell_checking(options.spell_check, cx);
             state
         });
-        let suggestion_feedback = cx
-            .subscribe(&editor_state, move |_, _, event: &SuggestionEvent, cx| {
-                completions.suggestion_event(event, cx)
-            });
+        let suggestion_feedback = suggestions.follow(&editor_state, cx);
         (editor_state, suggestion_feedback)
     }
 

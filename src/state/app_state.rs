@@ -1,15 +1,13 @@
 use super::Settings;
-use crate::autocomplete::{AutocompleteMode, SharedVocabulary, SuggestionPacing};
 use crate::fonts::{self, DEFAULT_EDITOR_FONT};
 use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::Keymap;
 use gpui_kit::component::{Theme, ThemeRegistry};
+use gpui_kit::writing::{SuggestionMode, WordList, Writing, WritingOptions};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, Context, Entity, FontWeight, Global, SharedString, Task,
 };
-use std::cell::RefCell;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::time::Duration;
 
 /// How often the word suggestions' vocabulary is saved while something new
@@ -17,17 +15,16 @@ use std::time::Duration;
 /// and jot quits.
 const VOCABULARY_SAVE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-/// What every window shares: the settings, the word suggestions' vocabulary
-/// and pacing, and which window was used last.
+/// What every window shares: the settings, the spelling dictionary, the word
+/// suggestions' vocabulary and pacing, and which window was used last.
 ///
 /// A change to the settings notifies the entity, and each window applies it
 /// to its own documents.
 pub struct AppState {
     pub settings: Settings,
-    /// The word suggestions' mode, and how the user has been answering them
-    /// this session.
-    pub suggestion_pacing: Rc<SuggestionPacing>,
-    pub shared_vocabulary: Rc<RefCell<SharedVocabulary>>,
+    /// The spelling dictionary, the word suggestions' vocabulary, their
+    /// mode, and how the user has been answering them this session.
+    pub writing: Writing,
     /// Where the settings are saved: the settings file, or nowhere in tests.
     settings_file: Option<PathBuf>,
     /// A font the settings named that the text system lacks. The first
@@ -45,41 +42,35 @@ struct GlobalAppState(Entity<AppState>);
 impl Global for GlobalAppState {}
 
 impl AppState {
-    /// Loads the settings and the vocabulary, for every window to share.
+    /// Loads the settings, and starts loading the dictionary and the
+    /// vocabulary, for every window to share.
     pub fn init(cx: &mut App) -> Entity<AppState> {
         let mut settings = Settings::load();
         let missing_font = use_an_available_editor_font(&mut settings, cx);
-        let state = Self::create(
-            settings,
-            SharedVocabulary::load(),
-            Settings::config_path(),
-            cx,
-        );
+        let writing = Writing::load(writing_options(), cx);
+        let state = Self::create(settings, writing, Settings::config_path(), cx);
         state.update(cx, |state, _| state.missing_font = missing_font);
         state
     }
 
     /// App-wide state that saves no settings, for tests.
     #[cfg(test)]
-    pub fn init_for_test(
-        settings: Settings,
-        vocabulary: SharedVocabulary,
-        cx: &mut App,
-    ) -> Entity<AppState> {
-        Self::create(settings, vocabulary, None, cx)
+    pub fn init_for_test(settings: Settings, writing: Writing, cx: &mut App) -> Entity<AppState> {
+        Self::create(settings, writing, None, cx)
     }
 
     fn create(
         settings: Settings,
-        vocabulary: SharedVocabulary,
+        writing: Writing,
         settings_file: Option<PathBuf>,
         cx: &mut App,
     ) -> Entity<AppState> {
+        writing.set_suggestion_mode(settings.autocomplete);
         let state = cx.new(|cx: &mut Context<Self>| {
             // Learning is saved on the way out, at logoff or shutdown too, and
             // every few minutes in case jot doesn't get to quit.
             let save_on_quit = cx.on_app_quit(|this: &mut Self, _| {
-                this.shared_vocabulary.borrow_mut().save();
+                this.writing.save();
                 async {}
             });
             let vocabulary_saves = cx.spawn(async move |this, cx| {
@@ -94,9 +85,8 @@ impl AppState {
                 }
             });
             Self {
-                suggestion_pacing: Rc::new(SuggestionPacing::new(settings.autocomplete)),
                 settings,
-                shared_vocabulary: Rc::new(RefCell::new(vocabulary)),
+                writing,
                 settings_file,
                 missing_font: None,
                 recent_windows: Vec::new(),
@@ -140,19 +130,14 @@ impl AppState {
 
     /// Saves the vocabulary without holding up the windows.
     pub fn save_vocabulary_in_background(&self, cx: &App) {
-        SharedVocabulary::save_in_background(&self.shared_vocabulary, cx).detach();
+        self.writing.save_in_background(cx).detach();
     }
 
-    /// Saves the vocabulary as a window closes. When jot quits with it, the
-    /// last window on Windows and Linux, the save finishes first. Otherwise
-    /// it runs in the background, and quitting saves later.
+    /// Saves the vocabulary as a window closes, in the background. When jot
+    /// quits with it, the last window on Windows and Linux, quitting waits
+    /// for that save, a second at most, with the window already gone.
     pub fn save_vocabulary_on_close(&self, cx: &App) {
-        let quits = cx.windows().len() <= 1 && !cfg!(target_os = "macos");
-        if quits {
-            self.shared_vocabulary.borrow_mut().save();
-        } else {
-            self.save_vocabulary_in_background(cx);
-        }
+        self.save_vocabulary_in_background(cx);
     }
 
     /// Saves the settings and tells every window, which applies them to its
@@ -225,9 +210,9 @@ impl AppState {
 
     /// Sets how eagerly every document offers word suggestions, from its
     /// next keystroke.
-    pub fn set_autocomplete(&mut self, mode: AutocompleteMode, cx: &mut Context<Self>) {
+    pub fn set_autocomplete(&mut self, mode: SuggestionMode, cx: &mut Context<Self>) {
         self.settings.autocomplete = mode;
-        self.suggestion_pacing.set_mode(mode);
+        self.writing.set_suggestion_mode(mode);
         self.settings_changed(cx);
     }
 
@@ -270,4 +255,19 @@ fn use_an_available_editor_font(settings: &mut Settings, cx: &App) -> Option<Sha
         .with_weight(FontWeight::NORMAL)
         .with_italic(false);
     Some(family)
+}
+
+/// Where jot keeps its writing aids' files, as it always has: in
+/// `<config>/jot`, with `vocabulary.json` and `user-dictionary.txt`, and with
+/// `dictionary.txt` there read as a word list besides English.
+fn writing_options() -> WritingOptions {
+    let Some(folder) = dirs::config_dir().map(|config| config.join("jot")) else {
+        return WritingOptions::new();
+    };
+    WritingOptions::new()
+        .with_word_lists([
+            WordList::English,
+            WordList::File(folder.join("dictionary.txt")),
+        ])
+        .with_data_dir(folder)
 }
