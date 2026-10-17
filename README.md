@@ -20,15 +20,11 @@ Words you add to the dictionary go to `user-dictionary.txt` in jot's settings fo
 `%APPDATA%\jot` on Windows, `~/Library/Application Support/jot` on macOS and `~/.config/jot` on
 Linux.
 
-## Status
-
-jot is moving from gpui-component 0.5.0 to [GPUI Kit](https://github.com/mesa-hills-research/gpui_kit).
-That work happens on the `gpui-kit` branch, which is the one to build and run.
-
 ## Building
 
-The `gpui-kit` branch builds from its GitHub dependencies. `main` expects a local copy of
-gpui-component 0.5.0 at the path in its `Cargo.toml`.
+jot is built on [GPUI Kit](https://github.com/mesa-hills-research/gpui_kit), which also supplies
+its spell checker, word suggestions and fonts. Cargo fetches the kit and its GPUI fork from
+GitHub.
 
 You need [Rust](https://rustup.rs/) and the tools GPUI builds with:
 
@@ -42,7 +38,6 @@ Then:
 ```sh
 git clone https://github.com/mesa-hills-research/jot
 cd jot
-git checkout gpui-kit
 cargo run --release
 ```
 
