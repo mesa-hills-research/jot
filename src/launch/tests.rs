@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// jot's app-wide state, with settings that aren't saved.
 fn start(cx: &mut TestAppContext) -> Entity<AppState> {
     cx.update(|cx| {
-        gpui_kit::init(cx);
+        super::init_kit(cx);
         let settings = Settings::default();
         let app_state = AppState::init_for_test(settings.clone(), Writing::in_memory(), cx);
         crate::actions::init(&settings, cx);
@@ -293,4 +293,19 @@ fn a_window_opened_with_files_has_only_them(cx: &mut TestAppContext) {
     // With none that opens, it starts with a new document.
     let window = open(vec![files.path("missing.txt")], cx);
     assert_eq!(tabs(window, cx).0, ["Untitled"]);
+}
+
+/// Every text field opens the kit's drawn context menu, the editor's and
+/// the others' (Go to Line, find, the settings' searches) alike, on every
+/// platform.
+#[gpui_kit::test]
+fn text_fields_open_the_drawn_menu(cx: &mut TestAppContext) {
+    use gpui_kit::component::input::ContextMenuStyle;
+    start(cx);
+    cx.update(|cx| {
+        assert_eq!(
+            ContextMenuStyle::app_default(cx),
+            Some(ContextMenuStyle::Drawn)
+        )
+    });
 }

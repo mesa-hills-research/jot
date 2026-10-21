@@ -80,7 +80,7 @@ fn main() {
         // button and its jump list.
         #[cfg(target_os = "windows")]
         windows_shell::set_app_identity(cx);
-        gpui_kit::init(cx);
+        launch::init_kit(cx);
         // Windows and Linux quit with the last window. macOS keeps jot
         // running, as Mac apps do, until Quit.
         cx.set_quit_mode(QuitMode::Default);

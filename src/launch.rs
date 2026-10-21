@@ -35,6 +35,17 @@ pub enum Launch {
     Files(Vec<PathBuf>),
 }
 
+/// Sets up GPUI Kit for jot, before its first window: every text field
+/// opens the kit's drawn context menu, as the editor does, instead of the
+/// operating system's menu on macOS and Windows.
+pub fn init_kit(cx: &mut App) {
+    gpui_kit::init(cx);
+    gpui_kit::component::input::ContextMenuStyle::set_app_default(
+        gpui_kit::component::input::ContextMenuStyle::Drawn,
+        cx,
+    );
+}
+
 /// Carries out a request from a later launch or from the system.
 pub fn handle(launch: Launch, cx: &mut App) {
     let (kind, paths) = match launch {
