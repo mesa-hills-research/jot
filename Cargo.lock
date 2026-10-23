@@ -1493,16 +1493,7 @@ version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
 dependencies = [
- "dirs-sys 0.4.1",
-]
-
-[[package]]
-name = "dirs"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
-dependencies = [
- "dirs-sys 0.5.0",
+ "dirs-sys",
 ]
 
 [[package]]
@@ -1513,20 +1504,8 @@ checksum = "520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c"
 dependencies = [
  "libc",
  "option-ext",
- "redox_users 0.4.6",
+ "redox_users",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "dirs-sys"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
-dependencies = [
- "libc",
- "option-ext",
- "redox_users 0.5.2",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2350,7 +2329,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=7065b0b090af0994770b430b2579dd68908399f9#7065b0b090af0994770b430b2579dd68908399f9"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d#cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2360,9 +2339,6 @@ dependencies = [
  "chrono",
  "data-url",
  "futures",
- "gpui-pre",
- "gpui-pre-macros",
- "gpui-pre-sum-tree",
  "html5ever",
  "image",
  "instant",
@@ -2370,6 +2346,9 @@ dependencies = [
  "lsp-types",
  "markdown",
  "markup5ever_rcdom",
+ "mhr-gpui",
+ "mhr-gpui-macros",
+ "mhr-sum-tree",
  "num-traits",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -2392,7 +2371,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=7065b0b090af0994770b430b2579dd68908399f9#7065b0b090af0994770b430b2579dd68908399f9"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d#cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2402,14 +2381,14 @@ dependencies = [
  "gpui-base",
  "gpui-component-macros",
  "gpui-kit-assets",
- "gpui-pre",
- "gpui-pre-macros",
- "gpui-pre-sum-tree",
  "instant",
  "itertools 0.13.0",
  "log",
  "lsp-types",
  "markdown",
+ "mhr-gpui",
+ "mhr-gpui-macros",
+ "mhr-sum-tree",
  "notify",
  "num-traits",
  "objc2 0.6.4",
@@ -2437,7 +2416,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=7065b0b090af0994770b430b2579dd68908399f9#7065b0b090af0994770b430b2579dd68908399f9"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d#cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2448,26 +2427,26 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=7065b0b090af0994770b430b2579dd68908399f9#7065b0b090af0994770b430b2579dd68908399f9"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d#cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d"
 dependencies = [
  "gpui-base",
  "gpui-component",
  "gpui-kit-assets",
  "gpui-kit-writing",
- "gpui-pre",
- "gpui-pre-platform",
- "gpui-pre-web",
+ "mhr-gpui",
+ "mhr-gpui-platform",
+ "mhr-gpui-web",
 ]
 
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=7065b0b090af0994770b430b2579dd68908399f9#7065b0b090af0994770b430b2579dd68908399f9"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d#cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d"
 dependencies = [
  "anyhow",
- "gpui-pre",
  "gpui-pre-reqwest",
  "log",
+ "mhr-gpui",
  "rust-embed",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -2476,289 +2455,14 @@ dependencies = [
 [[package]]
 name = "gpui-kit-writing"
 version = "0.7.1"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=7065b0b090af0994770b430b2579dd68908399f9#7065b0b090af0994770b430b2579dd68908399f9"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?rev=cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d#cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d"
 dependencies = [
  "anyhow",
  "gpui-base",
- "gpui-pre",
  "log",
+ "mhr-gpui",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "gpui-pre"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "accesskit",
- "anyhow",
- "async-channel",
- "async-task",
- "backtrace",
- "bindgen",
- "bitflags 2.13.1",
- "chrono",
- "core-video",
- "ctor",
- "derive_more",
- "embed-resource",
- "etagere",
- "futures",
- "futures-concurrency",
- "getrandom 0.3.4",
- "gpui-pre-collections",
- "gpui-pre-http-client",
- "gpui-pre-macros",
- "gpui-pre-refineable",
- "gpui-pre-scheduler",
- "gpui-pre-shared-string",
- "gpui-pre-sum-tree",
- "gpui-pre-util",
- "gpui-pre-util-macros",
- "heapless",
- "image",
- "inventory",
- "itertools 0.14.0",
- "libc",
- "log",
- "lyon",
- "num_cpus",
- "objc2-core-foundation",
- "objc2-core-video",
- "parking",
- "parking_lot",
- "pin-project",
- "pollster 0.4.0",
- "postage",
- "profiling",
- "proptest",
- "rand 0.9.5",
- "raw-window-handle",
- "regex",
- "resvg 0.46.0",
- "schemars",
- "seahash",
- "serde",
- "serde_json",
- "slotmap",
- "smallvec",
- "spin 0.10.1",
- "strum",
- "taffy",
- "thiserror 2.0.20",
- "ttf-parser",
- "url",
- "usvg 0.46.0",
- "uuid",
- "waker-fn",
- "web-time",
- "windows 0.62.2",
- "zed-font-kit",
- "zed-scap",
-]
-
-[[package]]
-name = "gpui-pre-apple"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "anyhow",
- "async-task",
- "block2 0.6.2",
- "cbindgen",
- "core-foundation 0.10.1",
- "core-graphics 0.24.0",
- "core-video",
- "derive_more",
- "dispatch2",
- "etagere",
- "foreign-types",
- "gpui-pre",
- "gpui-pre-util",
- "image",
- "libc",
- "log",
- "mach2",
- "metal",
- "objc2 0.6.4",
- "objc2-foundation 0.3.2",
- "objc2-quartz-core 0.3.2",
- "parking_lot",
-]
-
-[[package]]
-name = "gpui-pre-collections"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "gpui-pre-util",
- "indexmap",
- "rustc-hash 2.1.3",
-]
-
-[[package]]
-name = "gpui-pre-derive-refineable"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "gpui-pre-http-client"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "anyhow",
- "async-compression",
- "bytes",
- "derive_more",
- "futures",
- "http",
- "http-body",
- "log",
- "parking_lot",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "url",
-]
-
-[[package]]
-name = "gpui-pre-linux"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "accesskit",
- "accesskit_unix",
- "anyhow",
- "as-raw-xcb-connection",
- "ashpd 0.13.13",
- "bytemuck",
- "calloop",
- "calloop-wayland-source",
- "filedescriptor",
- "futures",
- "gpui-pre",
- "gpui-pre-collections",
- "gpui-pre-http-client",
- "gpui-pre-util",
- "gpui-pre-wgpu",
- "libc",
- "log",
- "notify-rust",
- "oo7",
- "open",
- "parking_lot",
- "raw-window-handle",
- "smallvec",
- "smol",
- "strum",
- "url",
- "uuid",
- "wayland-backend",
- "wayland-client",
- "wayland-cursor",
- "wayland-protocols",
- "wayland-protocols-plasma",
- "wayland-protocols-wlr",
- "x11rb",
- "xkbcommon",
- "zed-scap",
- "zed-xim",
-]
-
-[[package]]
-name = "gpui-pre-macos"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "accesskit",
- "accesskit_macos",
- "anyhow",
- "block2 0.6.2",
- "cocoa 0.26.0",
- "core-foundation 0.10.1",
- "core-foundation-sys",
- "core-graphics 0.24.0",
- "core-text",
- "core-video",
- "ctor",
- "dispatch2",
- "foreign-types",
- "futures",
- "gpui-pre",
- "gpui-pre-apple",
- "gpui-pre-collections",
- "gpui-pre-scheduler",
- "gpui-pre-util",
- "image",
- "itertools 0.14.0",
- "log",
- "objc",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-core-graphics",
- "objc2-core-media",
- "objc2-foundation 0.3.2",
- "objc2-screen-capture-kit",
- "objc2-user-notifications",
- "parking_lot",
- "pathfinder_geometry",
- "raw-window-handle",
- "semver",
- "smallvec",
- "strum",
- "uuid",
- "zed-font-kit",
-]
-
-[[package]]
-name = "gpui-pre-macros"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "heck 0.5.0",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "gpui-pre-perf"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "gpui-pre-collections",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "gpui-pre-platform"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "anyhow",
- "console_error_panic_hook",
- "gpui-pre",
- "gpui-pre-linux",
- "gpui-pre-macos",
- "gpui-pre-web",
- "gpui-pre-wgpu",
- "gpui-pre-windows",
-]
-
-[[package]]
-name = "gpui-pre-refineable"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "gpui-pre-derive-refineable",
 ]
 
 [[package]]
@@ -2810,175 +2514,6 @@ dependencies = [
  "web-sys",
  "windows-registry 0.4.0",
 ]
-
-[[package]]
-name = "gpui-pre-scheduler"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "async-task",
- "backtrace",
- "chrono",
- "flume",
- "futures",
- "parking_lot",
- "rand 0.9.5",
- "wasm_thread",
- "web-time",
-]
-
-[[package]]
-name = "gpui-pre-shared-string"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "schemars",
- "serde",
- "smol_str",
-]
-
-[[package]]
-name = "gpui-pre-sum-tree"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "gpui-pre-ztracing",
- "heapless",
- "log",
- "rayon",
- "tracing",
-]
-
-[[package]]
-name = "gpui-pre-util"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "anyhow",
- "log",
- "which",
-]
-
-[[package]]
-name = "gpui-pre-util-macros"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "gpui-pre-perf",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "gpui-pre-web"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "anyhow",
- "console_error_panic_hook",
- "futures",
- "gpui-pre",
- "gpui-pre-http-client",
- "gpui-pre-scheduler",
- "gpui-pre-wgpu",
- "js-sys",
- "log",
- "parking_lot",
- "raw-window-handle",
- "smallvec",
- "unicode-properties",
- "unicode-script",
- "unicode-segmentation",
- "uuid",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm_thread",
- "web-sys",
- "web-time",
-]
-
-[[package]]
-name = "gpui-pre-wgpu"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "anyhow",
- "bytemuck",
- "cosmic-text",
- "etagere",
- "gpui-pre",
- "gpui-pre-collections",
- "gpui-pre-util",
- "image",
- "itertools 0.14.0",
- "log",
- "parking_lot",
- "profiling",
- "raw-window-handle",
- "smallvec",
- "swash",
- "unicode-bidi",
- "unicode-segmentation",
- "web-sys",
- "wgpu",
- "zed-font-kit",
-]
-
-[[package]]
-name = "gpui-pre-windows"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "accesskit",
- "accesskit_windows",
- "anyhow",
- "dunce",
- "etagere",
- "futures",
- "gpui-pre",
- "gpui-pre-collections",
- "gpui-pre-scheduler",
- "gpui-pre-util",
- "image",
- "itertools 0.14.0",
- "log",
- "parking_lot",
- "rand 0.9.5",
- "raw-window-handle",
- "smallvec",
- "uuid",
- "windows 0.62.2",
- "windows-core 0.62.2",
- "windows-numerics 0.3.1",
- "windows-registry 0.6.1",
-]
-
-[[package]]
-name = "gpui-pre-zlog"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "anyhow",
- "chrono",
- "gpui-pre-collections",
- "log",
-]
-
-[[package]]
-name = "gpui-pre-ztracing"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
-dependencies = [
- "gpui-pre-zlog",
- "gpui-pre-ztracing-macro",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "gpui-pre-ztracing-macro"
-version = "0.3.8"
-source = "git+https://github.com/mesa-hills-research/gpui?rev=f81901422286163d323daf3d100c082282fe1729#f81901422286163d323daf3d100c082282fe1729"
 
 [[package]]
 name = "granit-parser"
@@ -3679,7 +3214,7 @@ dependencies = [
  "anyhow",
  "async-channel",
  "chrono",
- "dirs 5.0.1",
+ "dirs",
  "env_logger",
  "gpui-kit",
  "libc",
@@ -4106,6 +3641,472 @@ dependencies = [
  "objc",
  "paste",
 ]
+
+[[package]]
+name = "mhr-collections"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "635b7c7317ffca591dc6ceaddeff85e8f6c825da31fd35899097074ff19269d4"
+dependencies = [
+ "indexmap",
+ "mhr-gpui-util",
+ "rustc-hash 2.1.3",
+]
+
+[[package]]
+name = "mhr-derive-refineable"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a97431ba6111782d2f2c32ab22d9cd7037cbac418d83b499ea1a9ab47122e76"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "mhr-gpui"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4058e83fc67bb1109c83988fb8eeee7c47dee2b7357ead7fde29c4f420c6796"
+dependencies = [
+ "accesskit",
+ "anyhow",
+ "async-channel",
+ "async-task",
+ "backtrace",
+ "bindgen",
+ "bitflags 2.13.1",
+ "chrono",
+ "core-video",
+ "ctor",
+ "derive_more",
+ "embed-resource",
+ "etagere",
+ "futures",
+ "futures-concurrency",
+ "getrandom 0.3.4",
+ "heapless",
+ "image",
+ "inventory",
+ "itertools 0.14.0",
+ "libc",
+ "log",
+ "lyon",
+ "mhr-collections",
+ "mhr-gpui-macros",
+ "mhr-gpui-shared-string",
+ "mhr-gpui-util",
+ "mhr-http-client",
+ "mhr-refineable",
+ "mhr-scheduler",
+ "mhr-sum-tree",
+ "mhr-util-macros",
+ "num_cpus",
+ "objc2-core-foundation",
+ "objc2-core-video",
+ "parking",
+ "parking_lot",
+ "pin-project",
+ "pollster 0.4.0",
+ "postage",
+ "profiling",
+ "proptest",
+ "rand 0.9.5",
+ "raw-window-handle",
+ "regex",
+ "resvg 0.46.0",
+ "schemars",
+ "seahash",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "smallvec",
+ "spin 0.10.1",
+ "strum",
+ "taffy",
+ "thiserror 2.0.20",
+ "ttf-parser",
+ "url",
+ "usvg 0.46.0",
+ "uuid",
+ "waker-fn",
+ "web-time",
+ "windows 0.62.2",
+ "zed-font-kit",
+ "zed-scap",
+]
+
+[[package]]
+name = "mhr-gpui-apple"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b92ef5e80e24ea1d55ba063ee39074e4a648a4ddf96c353728285d61fdc59ef2"
+dependencies = [
+ "anyhow",
+ "async-task",
+ "block2 0.6.2",
+ "cbindgen",
+ "core-foundation 0.10.1",
+ "core-graphics 0.24.0",
+ "core-video",
+ "derive_more",
+ "dispatch2",
+ "etagere",
+ "foreign-types",
+ "image",
+ "libc",
+ "log",
+ "mach2",
+ "metal",
+ "mhr-gpui",
+ "mhr-gpui-util",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "parking_lot",
+]
+
+[[package]]
+name = "mhr-gpui-linux"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "844f492f76d60ae05ffd65890f3159ec0d1711758ef3f999e7902030aa769da0"
+dependencies = [
+ "accesskit",
+ "accesskit_unix",
+ "anyhow",
+ "as-raw-xcb-connection",
+ "ashpd 0.13.13",
+ "bytemuck",
+ "calloop",
+ "calloop-wayland-source",
+ "filedescriptor",
+ "futures",
+ "libc",
+ "log",
+ "mhr-collections",
+ "mhr-gpui",
+ "mhr-gpui-util",
+ "mhr-gpui-wgpu",
+ "mhr-http-client",
+ "notify-rust",
+ "oo7",
+ "open",
+ "parking_lot",
+ "raw-window-handle",
+ "smallvec",
+ "smol",
+ "strum",
+ "url",
+ "uuid",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-cursor",
+ "wayland-protocols",
+ "wayland-protocols-plasma",
+ "wayland-protocols-wlr",
+ "x11rb",
+ "xkbcommon",
+ "zed-scap",
+ "zed-xim",
+]
+
+[[package]]
+name = "mhr-gpui-macos"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2241add0e07ab134d3327a58b14e0dbe65ff92c7f3170d90f331510ac3a3d701"
+dependencies = [
+ "accesskit",
+ "accesskit_macos",
+ "anyhow",
+ "block2 0.6.2",
+ "cocoa 0.26.0",
+ "core-foundation 0.10.1",
+ "core-foundation-sys",
+ "core-graphics 0.24.0",
+ "core-text",
+ "core-video",
+ "ctor",
+ "dispatch2",
+ "foreign-types",
+ "futures",
+ "image",
+ "itertools 0.14.0",
+ "log",
+ "mhr-collections",
+ "mhr-gpui",
+ "mhr-gpui-apple",
+ "mhr-gpui-util",
+ "mhr-scheduler",
+ "objc",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-graphics",
+ "objc2-core-media",
+ "objc2-foundation 0.3.2",
+ "objc2-screen-capture-kit",
+ "objc2-user-notifications",
+ "parking_lot",
+ "pathfinder_geometry",
+ "raw-window-handle",
+ "semver",
+ "smallvec",
+ "strum",
+ "uuid",
+ "zed-font-kit",
+]
+
+[[package]]
+name = "mhr-gpui-macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5ad09dbfdcbdccdd1b041b33e0cb21dd7b9990a75dddacbb4b34109991eec70"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "mhr-gpui-platform"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c0cf86739f973123d9f9317a43367cbd7911456bf86a71673da54d32c9be0d9"
+dependencies = [
+ "anyhow",
+ "console_error_panic_hook",
+ "mhr-gpui",
+ "mhr-gpui-linux",
+ "mhr-gpui-macos",
+ "mhr-gpui-web",
+ "mhr-gpui-wgpu",
+ "mhr-gpui-windows",
+]
+
+[[package]]
+name = "mhr-gpui-shared-string"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe2baf2b7918ddb223433bbce34269f8b206b0252b6efa96b73ab37b556d6959"
+dependencies = [
+ "schemars",
+ "serde",
+ "smol_str",
+]
+
+[[package]]
+name = "mhr-gpui-util"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "297f6aa44f24444cd08ec4c8585900fc45664f9461096af8e644cd1c98e25fda"
+dependencies = [
+ "anyhow",
+ "log",
+ "which",
+]
+
+[[package]]
+name = "mhr-gpui-web"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5303d96a72f47f328c0492041870004f939994205d54019120068e6a196e757"
+dependencies = [
+ "anyhow",
+ "console_error_panic_hook",
+ "futures",
+ "js-sys",
+ "log",
+ "mhr-gpui",
+ "mhr-gpui-wgpu",
+ "mhr-http-client",
+ "mhr-scheduler",
+ "parking_lot",
+ "raw-window-handle",
+ "smallvec",
+ "unicode-properties",
+ "unicode-script",
+ "unicode-segmentation",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm_thread",
+ "web-sys",
+ "web-time",
+]
+
+[[package]]
+name = "mhr-gpui-wgpu"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2140273d35195c270eae70a85c1097c5ac6992403b93db7e829c1d51df6085cd"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cosmic-text",
+ "etagere",
+ "image",
+ "itertools 0.14.0",
+ "log",
+ "mhr-collections",
+ "mhr-gpui",
+ "mhr-gpui-util",
+ "parking_lot",
+ "profiling",
+ "raw-window-handle",
+ "smallvec",
+ "swash",
+ "unicode-bidi",
+ "unicode-segmentation",
+ "web-sys",
+ "wgpu",
+ "zed-font-kit",
+]
+
+[[package]]
+name = "mhr-gpui-windows"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4ebeb190bc37ed94a67dc8f5c40a08fb0f1272fe63ace0ee376f6db000ee89d"
+dependencies = [
+ "accesskit",
+ "accesskit_windows",
+ "anyhow",
+ "dunce",
+ "etagere",
+ "futures",
+ "image",
+ "itertools 0.14.0",
+ "log",
+ "mhr-collections",
+ "mhr-gpui",
+ "mhr-gpui-util",
+ "mhr-scheduler",
+ "parking_lot",
+ "rand 0.9.5",
+ "raw-window-handle",
+ "smallvec",
+ "uuid",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "windows-numerics 0.3.1",
+ "windows-registry 0.6.1",
+]
+
+[[package]]
+name = "mhr-http-client"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3575c6f08ea5d4159831b372449e26efec258c61a7a44d0ce7aa525fc1e28328"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "bytes",
+ "derive_more",
+ "futures",
+ "http",
+ "http-body",
+ "log",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "url",
+]
+
+[[package]]
+name = "mhr-perf"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acf42063dd7fdf1c2b3638355800ab764328876e82526d3af329b6073dce3d97"
+dependencies = [
+ "mhr-collections",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mhr-refineable"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "871261d149dc697ebd73fe596721df2e437afcb137e5513c157fe37b646d7fa9"
+dependencies = [
+ "mhr-derive-refineable",
+]
+
+[[package]]
+name = "mhr-scheduler"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97d70a910ec7c7e9088e8c36b1a8d1172dd80820a799369d58d11e61d10309a8"
+dependencies = [
+ "async-task",
+ "backtrace",
+ "chrono",
+ "flume",
+ "futures",
+ "parking_lot",
+ "rand 0.9.5",
+ "wasm_thread",
+ "web-time",
+]
+
+[[package]]
+name = "mhr-sum-tree"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "918f783b98e5cbf3e5f306ead213ee623ebeb8e59b82958d8cea6914b255ed46"
+dependencies = [
+ "heapless",
+ "log",
+ "mhr-ztracing",
+ "rayon",
+ "tracing",
+]
+
+[[package]]
+name = "mhr-util-macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2627e5a84e8b2b60824624a241f736c3ecfe82fdf332e85b9133da77c9dc512b"
+dependencies = [
+ "mhr-perf",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "mhr-zlog"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e0dc51ec53a486203b8b58cb718b8c81f006cebe1d1e4de95d0fc5b8176a95b"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "log",
+ "mhr-collections",
+]
+
+[[package]]
+name = "mhr-ztracing"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff78833cd23b5ede2399314d92cabf0197f8da28290bc7657be713c07cd7fefa"
+dependencies = [
+ "mhr-zlog",
+ "mhr-ztracing-macro",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "mhr-ztracing-macro"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4338b89a5c6dcac4640fa904bfd6e07b13e1707dacdffc196228bdea9c718e09"
 
 [[package]]
 name = "mime"
@@ -5709,17 +5710,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "redox_users"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
-dependencies = [
- "getrandom 0.2.17",
- "libredox",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "ref-cast"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6402,7 +6392,7 @@ version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32824fab5e16e6c4d86dc1ba84489390419a39f97699852b66480bb87d297ed8"
 dependencies = [
- "dirs 5.0.1",
+ "dirs",
 ]
 
 [[package]]
@@ -7721,7 +7711,8 @@ dependencies = [
 [[package]]
 name = "wasm_thread"
 version = "0.3.3"
-source = "git+https://github.com/zed-industries/wasm_thread?rev=0cf96c7708dfb97ccf3da50347e25edcf75d6937#0cf96c7708dfb97ccf3da50347e25edcf75d6937"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7516db7f32decdadb1c3b8deb1b7d78b9df7606c5cc2f6241737c2ab3a0258e"
 dependencies = [
  "futures",
  "js-sys",
@@ -8758,15 +8749,17 @@ checksum = "163b33ed8786455e2fa5d72f554057ce3f3182425434f756cd39c99839d88e23"
 [[package]]
 name = "xim-ctext"
 version = "0.3.0"
-source = "git+https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c881b815a2b6cdfd6687988e84f8447d8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ac61a7062c40f3c37b6e82eeeef835d5cc7824b632a72784a89b3963c33284c"
 dependencies = [
  "encoding_rs",
 ]
 
 [[package]]
 name = "xim-parser"
-version = "0.2.1"
-source = "git+https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c881b815a2b6cdfd6687988e84f8447d8"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5dcee45f89572d5a65180af3a84e7ddb24f5ea690a6d3aa9de231281544dd7b7"
 dependencies = [
  "bitflags 2.13.1",
 ]
@@ -8967,14 +8960,15 @@ dependencies = [
 [[package]]
 name = "zed-font-kit"
 version = "0.14.1-zed"
-source = "git+https://github.com/zed-industries/font-kit?rev=94b0f28166665e8fd2f53ff6d268a14955c82269#94b0f28166665e8fd2f53ff6d268a14955c82269"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3898e450f36f852edda72e3f985c34426042c4951790b23b107f93394f9bff5"
 dependencies = [
  "bitflags 2.13.1",
  "byteorder",
  "core-foundation 0.10.1",
  "core-graphics 0.24.0",
  "core-text",
- "dirs 6.0.0",
+ "dirs",
  "dwrote",
  "float-ord",
  "freetype-sys",
@@ -8991,7 +8985,8 @@ dependencies = [
 [[package]]
 name = "zed-scap"
 version = "0.0.8-zed"
-source = "git+https://github.com/zed-industries/scap?rev=4afea48c3b002197176fb19cd0f9b180dd36eaac#4afea48c3b002197176fb19cd0f9b180dd36eaac"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6b338d705ae33a43ca00287c11129303a7a0aa57b101b72a1c08c863f698ac8"
 dependencies = [
  "anyhow",
  "cocoa 0.25.0",
@@ -9012,7 +9007,8 @@ dependencies = [
 [[package]]
 name = "zed-xim"
 version = "0.4.0-zed"
-source = "git+https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c881b815a2b6cdfd6687988e84f8447d8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c0b46ed118eba34d9ba53d94ddc0b665e0e06a2cf874cfa2dd5dec278148642"
 dependencies = [
  "ahash",
  "hashbrown 0.14.5",
