@@ -12,12 +12,12 @@ build = "build.rs"
 winresource = "0.1"
 
 [dependencies]
-# GPUI Kit from Mesa Hills Research's fork. It pins the matching mhr-gpui release
+# GPUI Kit from Mesa Hills Research's fork, published as mhr-gpui-kit. It pins the matching mhr-gpui release
 # and re-exports it, so GPUI is `gpui_kit::*` and needs no entry of its own. Its
 # `writing` feature brings the spell checker and the word suggestions, and its
 # `fonts` feature embeds Work Sans and JetBrains Mono as variable fonts, the
 # interface and editor fonts.
-gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d", features = ["writing", "fonts"] }
+gpui-kit = { package = "mhr-gpui-kit", version = "=0.7.2", features = ["writing", "fonts"] }
 anyhow = "1.0"
 rust-embed = "8.5"
 serde = { version = "1.0", features = ["derive"] }
@@ -57,7 +57,7 @@ windows-registry = "0.6"
 [dev-dependencies]
 # The same GPUI Kit, with GPUI's test harness for tests that type into a real
 # text editor on a fake clock.
-gpui-kit = { git = "https://github.com/mesa-hills-research/gpui_kit", rev = "cbcdecdf1a7cab60cdea890cbe1cfcb34cb4251d", features = ["writing", "fonts", "test-support"] }
+gpui-kit = { package = "mhr-gpui-kit", version = "=0.7.2", features = ["writing", "fonts", "test-support"] }
 
 [profile.release]
 opt-level = 3
