@@ -23,7 +23,8 @@ Linux.
 ## Building
 
 jot is built on [GPUI Kit](https://github.com/mesa-hills-research/gpui_kit), which also supplies
-its spell checker, word suggestions and fonts. Cargo fetches the kit and GPUI from crates.io.
+its spell checker, word suggestions and fonts. Cargo fetches the kit and GPUI from crates.io, and
+`cargo deny check sources` fails on any dependency that comes from elsewhere.
 
 You need [Rust](https://rustup.rs/) and the tools GPUI builds with:
 

@@ -1,0 +1,6 @@
+# Every dependency comes from crates.io. `cargo deny check sources` fails on a
+# git dependency or another registry.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,0 +1,14 @@
+name: Sources
+on:
+  pull_request:
+  push:
+
+jobs:
+  sources:
+    name: Dependencies come from crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2.1.1
+        with:
+          command: check sources
