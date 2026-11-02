@@ -38,9 +38,10 @@ impl Scratch {
         self.0.join("run")
     }
 
-    /// The folder jot is launched in.
+    /// The folder jot is launched in. It is named as jot finds it, which on
+    /// macOS is `/private/var/…` where the temp folder says `/var/…`.
     fn work(&self) -> PathBuf {
-        self.0.join("work")
+        self.0.join("work").canonicalize().unwrap()
     }
 
     /// Launches jot with `args`.
