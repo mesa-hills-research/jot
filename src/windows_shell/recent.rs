@@ -4,6 +4,7 @@
 use super::same_path;
 use gpui_kit::{JumpListIcon, JumpListRecent};
 use serde::{Deserialize, Serialize};
+use std::io;
 use std::path::{Path, PathBuf};
 
 /// How many files the list keeps.
@@ -67,6 +68,29 @@ impl RecentFiles {
             system_recent: false,
         }
     }
+}
+
+/// Changes the list saved in the file at `file` with `change`, which says
+/// whether it changed anything, and returns the list. The file is read and
+/// written in one save, so that a change by another jot comes before or
+/// after this one, never between its read and its write. A copy of the file
+/// goes to `backups` while it's written in place.
+pub fn edit_saved(
+    file: &Path,
+    backups: &Path,
+    mut change: impl FnMut(&mut RecentFiles) -> bool,
+) -> io::Result<RecentFiles> {
+    if let Some(folder) = file.parent() {
+        std::fs::create_dir_all(folder)?;
+    }
+    let mut recent = RecentFiles::default();
+    crate::file_write::update_whole(file, backups, |saved| {
+        recent = saved
+            .map(|json| RecentFiles::from_json(&String::from_utf8_lossy(&json)))
+            .unwrap_or_default();
+        change(&mut recent).then(|| recent.to_json().into_bytes())
+    })?;
+    Ok(recent)
 }
 
 #[cfg(test)]
@@ -144,5 +168,44 @@ mod tests {
             b"/notes/caf\xe9.txt".to_vec(),
         )));
         assert!(recent.files().is_empty());
+    }
+
+    /// Files added by several jots at once all go in.
+    #[test]
+    fn edits_from_several_jots_at_once_all_go_in() {
+        let folder = std::env::temp_dir().join(format!("jot-recent-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let file = folder.join("jot").join("recent.json");
+        let backups = folder.join("backups");
+        let edits: Vec<_> = (0..4)
+            .map(|jot| {
+                let (file, backups) = (file.clone(), backups.clone());
+                std::thread::spawn(move || {
+                    for n in 0..2 {
+                        edit_saved(&file, &backups, |recent| {
+                            recent.add(&path(&format!("{jot}-{n}.txt")));
+                            std::thread::yield_now();
+                            true
+                        })
+                        .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for edit in edits {
+            edit.join().unwrap();
+        }
+        let saved = RecentFiles::from_json(&std::fs::read_to_string(&file).unwrap());
+        assert_eq!(saved.files().len(), 8, "{saved:?}");
+
+        // An edit that changes nothing returns the list and writes nothing.
+        let before = std::fs::metadata(&file).unwrap().modified().unwrap();
+        let recent = edit_saved(&file, &backups, |_| false).unwrap();
+        assert_eq!(recent, saved);
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().modified().unwrap(),
+            before
+        );
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 }

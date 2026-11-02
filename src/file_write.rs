@@ -55,14 +55,55 @@ const ATTEMPTS: usize = 8;
 /// file. The folder must exist. A file written in place is first copied
 /// into `backups`, which is made if need be and should be the user's alone.
 pub fn write_whole(path: &Path, data: &[u8], backups: &Path) -> io::Result<()> {
-    write_whole_with(path, backups, &mut |file| file.write_all(data))
+    write_whole_with(path, backups, &mut |_| Ok(true), &mut |file| {
+        file.write_all(data)
+    })
+}
+
+/// Replaces the contents of the file at `path` with what `update` makes of
+/// them, or makes the file, as [`write_whole`] does. `update` gets them, or
+/// `None` for a file that doesn't exist yet, while the save holds the file,
+/// so that other updates come before or after it and never between its
+/// read and its write. When it returns `None`, nothing is written. It may
+/// run again when the save starts again.
+// The recent files, which only Windows has, use it.
+#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+pub fn update_whole(
+    path: &Path,
+    backups: &Path,
+    mut update: impl FnMut(Option<Vec<u8>>) -> Option<Vec<u8>>,
+) -> io::Result<()> {
+    let contents = std::cell::RefCell::new(None);
+    write_whole_with(
+        path,
+        backups,
+        &mut |file| {
+            let old = match file {
+                Some(file) => {
+                    let mut old = Vec::new();
+                    file.seek(SeekFrom::Start(0))?;
+                    io::Read::read_to_end(file, &mut old)?;
+                    Some(old)
+                }
+                None => None,
+            };
+            let new = update(old);
+            let changed = new.is_some();
+            *contents.borrow_mut() = new;
+            Ok(changed)
+        },
+        &mut |file| file.write_all(contents.borrow().as_deref().unwrap_or_default()),
+    )
 }
 
 /// [`write_whole`], with `write` writing the new contents to the file it's
-/// given, each time the save starts.
+/// given, each time the save starts. First `decide` says whether to write
+/// at all, given the file as it is, which the save holds by then, or `None`
+/// for one that doesn't exist.
 fn write_whole_with(
     path: &Path,
     backups: &Path,
+    decide: &mut dyn FnMut(Option<&mut File>) -> io::Result<bool>,
     write: &mut dyn FnMut(&mut File) -> io::Result<()>,
 ) -> io::Result<()> {
     let mut attempts = 0;
@@ -72,6 +113,9 @@ fn write_whole_with(
         let (mut file, readable) = match open_to_write(&target) {
             Ok(opened) => opened,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if !decide(None)? {
+                    return Ok(());
+                }
                 match stage(path, &target, None, write)? {
                     Staged::Committed => return Ok(()),
                     _ => continue,
@@ -92,6 +136,9 @@ fn write_whole_with(
             Err(fs::TryLockError::Error(error)) => return Err(error),
         };
         let named = is_named_by(path, &target, &file)?;
+        if named && !decide(Some(&mut file))? {
+            return Ok(());
+        }
         if named && save_locked(path, &target, &mut file, readable, backups, write)? {
             return Ok(());
         }
@@ -734,7 +781,7 @@ mod tests {
             path: &Path,
             write: &mut dyn FnMut(&mut File) -> io::Result<()>,
         ) -> io::Result<()> {
-            write_whole_with(path, &self.backups(), write)
+            write_whole_with(path, &self.backups(), &mut |_| Ok(true), write)
         }
     }
 
@@ -1094,13 +1141,14 @@ mod tests {
                 );
                 thread::spawn(move || {
                     for _ in 0..SAVES {
-                        let saved = write_whole_with(&file, &backups, &mut |written| {
-                            for piece in text.chunks(500) {
-                                written.write_all(piece)?;
-                                thread::yield_now();
-                            }
-                            Ok(())
-                        });
+                        let saved =
+                            write_whole_with(&file, &backups, &mut |_| Ok(true), &mut |written| {
+                                for piece in text.chunks(500) {
+                                    written.write_all(piece)?;
+                                    thread::yield_now();
+                                }
+                                Ok(())
+                            });
                         // A reader that takes the lock finds one whole text.
                         let read = saved.and_then(|()| {
                             let mut reader = File::open(&file)?;
@@ -1127,6 +1175,55 @@ mod tests {
             }
             assert!(folder.backups_left().is_empty());
         }
+    }
+
+    #[test]
+    fn updates_at_once_each_see_the_ones_before() {
+        const UPDATES: usize = 25;
+        let folder = Folder::new("updates-at-once");
+        let file = folder.path("count.txt");
+        let (progress, made) = mpsc::channel();
+        for _ in 0..4 {
+            let (progress, file, backups) = (progress.clone(), file.clone(), folder.backups());
+            thread::spawn(move || {
+                for _ in 0..UPDATES {
+                    let updated = update_whole(&file, &backups, |old| {
+                        let count: usize =
+                            old.map_or(0, |old| String::from_utf8_lossy(&old).parse().unwrap());
+                        thread::yield_now();
+                        Some((count + 1).to_string().into_bytes())
+                    });
+                    if progress
+                        .send(updated.map_err(|error| error.to_string()))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+        }
+        drop(progress);
+        for _ in 0..4 * UPDATES {
+            let updated = made
+                .recv_timeout(Duration::from_secs(30))
+                .expect("the updates stopped making progress");
+            assert_eq!(updated, Ok(()));
+        }
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            (4 * UPDATES).to_string()
+        );
+
+        // An update that changes nothing leaves the file alone.
+        let before = fs::metadata(&file).unwrap().modified().unwrap();
+        update_whole(&file, &folder.backups(), |old| {
+            assert_eq!(old.as_deref(), Some(&b"100"[..]));
+            None
+        })
+        .unwrap();
+        assert_eq!(fs::metadata(&file).unwrap().modified().unwrap(), before);
+        assert_eq!(folder.names(), ["count.txt"]);
+        assert!(folder.backups_left().is_empty());
     }
 
     /// Saves `notes.txt` in a folder of its own, while `meanwhile`, given

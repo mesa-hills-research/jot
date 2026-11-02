@@ -311,20 +311,19 @@ impl AppState {
     }
 }
 
-/// Runs `write` on a thread of its own, which may block for as long as it
+/// Runs `work` on a thread of its own, which may block for as long as it
 /// needs, such as on a slow disk or for another program's save of the same
 /// file, while the windows go on.
-pub async fn on_own_thread(
-    write: impl FnOnce() -> io::Result<()> + Send + 'static,
-) -> io::Result<()> {
-    let (sender, written) = futures::channel::oneshot::channel();
+pub async fn on_own_thread<T: Send + 'static>(
+    work: impl FnOnce() -> io::Result<T> + Send + 'static,
+) -> io::Result<T> {
+    let (sender, done) = futures::channel::oneshot::channel();
     std::thread::Builder::new()
         .name("jot-save".into())
         .spawn(move || {
-            let _ = sender.send(write());
+            let _ = sender.send(work());
         })?;
-    written
-        .await
+    done.await
         .unwrap_or_else(|_| Err(io::Error::other("The save stopped partway")))
 }
 
