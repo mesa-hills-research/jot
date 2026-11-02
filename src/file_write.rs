@@ -18,7 +18,8 @@
 //!   processes included, take turns. Each locks the file from start to end,
 //!   and the new file that takes its name from before then until the save
 //!   ends. So their writes never mix, none puts old contents back over
-//!   another's, and an update never runs twice.
+//!   another's, and an update never runs twice. A save waits a minute at
+//!   most for another to end, and then fails.
 //! - When another program moves, replaces, relinks or changes the file's
 //!   permissions during a save, the save notices before its change takes
 //!   effect, puts back what it changed, and starts again on what the path
@@ -47,6 +48,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// What a test does at a point in a save, as another program might then.
 #[cfg(test)]
@@ -54,11 +56,51 @@ type StepIn<T> = std::cell::Cell<Option<Box<dyn FnOnce(&Path) -> T>>>;
 
 #[cfg(test)]
 thread_local! {
+    /// How long a save on this thread waits for another, in place of the
+    /// usual.
+    pub static LOCK_WAIT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
     /// Runs on this thread just after a staged file has taken its name.
     pub static AFTER_COMMIT: StepIn<()> = const { std::cell::Cell::new(None) };
     /// Runs on this thread just before a file [`create_whole`] makes is
     /// synced. An error fails the sync, as a failing disk would.
     pub static BEFORE_SYNC: StepIn<io::Result<()>> = const { std::cell::Cell::new(None) };
+}
+
+/// How long a save waits for another save of the same file to end.
+const LOCK_WAIT_LIMIT: Duration = Duration::from_secs(60);
+
+/// Locks `file`, waiting for a save of it, by this program or another, to
+/// end, and returns whether it waited. After [`LOCK_WAIT_LIMIT`] it gives
+/// up with `TimedOut`, so that a save stuck elsewhere doesn't hold this one
+/// for good.
+fn lock(file: &File) -> io::Result<bool> {
+    #[cfg(test)]
+    let limit = LOCK_WAIT.get().unwrap_or(LOCK_WAIT_LIMIT);
+    #[cfg(not(test))]
+    let limit = LOCK_WAIT_LIMIT;
+    let started = std::time::Instant::now();
+    let mut pause = Duration::from_millis(1);
+    let mut waited = false;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(waited),
+            Err(fs::TryLockError::WouldBlock) if started.elapsed() < limit => {
+                waited = true;
+                std::thread::sleep(pause);
+                pause = (pause * 2).min(Duration::from_millis(50));
+            }
+            Err(fs::TryLockError::WouldBlock) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!(
+                        "Another save of it has gone on for over {} seconds",
+                        limit.as_secs()
+                    ),
+                ));
+            }
+            Err(fs::TryLockError::Error(error)) => return Err(error),
+        }
+    }
 }
 
 /// How many times a save starts again when another program changes the file
@@ -157,18 +199,10 @@ fn write_whole_with(
             }
             Err(error) => return Err(error),
         };
-        // Waits for a save of the same file, by this program or another, to
-        // end. shortcut: Linux turns these locks into ones per process on
-        // NFS, so there two saves in one process don't wait for each other.
-        // Add a lock per file within the process if that comes up.
-        let waited = match file.try_lock() {
-            Ok(()) => false,
-            Err(fs::TryLockError::WouldBlock) => {
-                file.lock()?;
-                true
-            }
-            Err(fs::TryLockError::Error(error)) => return Err(error),
-        };
+        // shortcut: Linux turns these locks into ones per process on NFS,
+        // so there two saves in one process don't wait for each other. Add
+        // a lock per file within the process if that comes up.
+        let waited = lock(&file)?;
         let named = is_named_by(path, &target, &file)?;
         if named && !decide(Some(&mut file))? {
             return Ok(());
@@ -290,7 +324,7 @@ fn stage(
         // Locked before it takes the name, until this save has checked it
         // and ended, so that a save that opens it under that name waits, as
         // it would for the file it replaces.
-        staged.lock()?;
+        lock(&staged)?;
         #[cfg(target_os = "linux")]
         let before = original.map(access).transpose()?;
         #[cfg(target_os = "linux")]
@@ -1181,8 +1215,32 @@ mod tests {
     }
 
     #[test]
+    fn a_save_waits_for_another_only_so_long() {
+        let folder = Folder::new("waits-so-long");
+        let file = folder.path("notes.txt");
+        fs::write(&file, "old").unwrap();
+        // Another save holds the file, and doesn't end.
+        let held = File::open(&file).unwrap();
+        held.lock().unwrap();
+        LOCK_WAIT.set(Some(Duration::from_millis(200)));
+        let error = folder.save(&file, b"new").unwrap_err();
+        LOCK_WAIT.set(None);
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut, "{error}");
+        drop(held);
+        assert_eq!(fs::read_to_string(&file).unwrap(), "old");
+        assert_eq!(folder.names(), ["notes.txt"]);
+    }
+
+    #[test]
     fn an_update_holds_the_file_it_made_until_it_has_checked_it() {
-        for existing in [false, true] {
+        // An existing file takes a new file's place on Linux alone. Elsewhere
+        // it's written in place, and stays locked throughout.
+        let existing: &[bool] = if cfg!(target_os = "linux") {
+            &[false, true]
+        } else {
+            &[false]
+        };
+        for &existing in existing {
             let folder = Folder::new(if existing {
                 "handoff-existing"
             } else {
@@ -1215,8 +1273,10 @@ mod tests {
                 let _ = other_sender.send(update);
             })));
             update_whole(&file, &folder.backups(), add_one).unwrap();
-            let held = held.recv().unwrap();
-            other.recv().unwrap().join().unwrap().unwrap();
+            assert!(AFTER_COMMIT.take().is_none(), "no new file took the name");
+            let held = held.recv_timeout(Duration::from_secs(10)).unwrap();
+            let other = other.recv_timeout(Duration::from_secs(10)).unwrap();
+            other.join().unwrap().unwrap();
             assert!(held, "the new file wasn't locked, existing: {existing}");
             assert_eq!(
                 fs::read_to_string(&file).unwrap(),
