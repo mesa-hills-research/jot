@@ -90,14 +90,9 @@ impl Editor {
     ) {
         let xml_enabled = window_state.read(cx).settings(cx).xml_auto_complete;
 
-        let (current_text, cursor, current_len, cursor_pos) = {
+        let (cursor, current_len, cursor_pos) = {
             let state = editor_state.read(cx);
-            (
-                state.value().to_string(),
-                state.cursor(),
-                state.text().len(),
-                state.cursor_position(),
-            )
+            (state.cursor(), state.text().len(), state.cursor_position())
         };
 
         let prev_len = self.last_text_len;
@@ -123,6 +118,9 @@ impl Editor {
             return;
         }
 
+        // Copied only for a character typed with XML on, since copying a
+        // large document on every keystroke slows typing.
+        let current_text = editor_state.read(cx).text().to_string();
         if let Some(closing_tag) = Self::detect_xml_tag_to_close(&current_text, cursor) {
             let remainder = &current_text[cursor..];
             let next_non_whitespace = remainder.trim_start();
