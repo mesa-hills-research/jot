@@ -159,33 +159,24 @@ impl Settings {
 
 /// Keeps `content`, from the damaged settings file at `path`, in the first
 /// of `settings.damaged.json`, `settings.damaged-2.json` and so on that
-/// holds it already or is free, and returns that file. A name is taken only
-/// by making a new file, so no copy, this jot's or another's, is ever
-/// written over.
+/// holds it already or is free, and returns that file. A copy takes its
+/// name only once it's whole and synced, so one found under a name is
+/// finished, and none is ever written over.
 fn keep_copy(path: &Path, content: &[u8]) -> io::Result<PathBuf> {
-    use std::io::Write as _;
     for n in 1..=1000 {
         let kept = match n {
             1 => path.with_extension("damaged.json"),
             n => path.with_extension(format!("damaged-{n}.json")),
         };
-        let mut copy = match std::fs::File::create_new(&kept) {
-            Ok(copy) => copy,
+        match crate::file_write::create_whole(&kept, content) {
+            Ok(()) => return Ok(kept),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 if std::fs::read(&kept).is_ok_and(|kept| kept == content) {
                     return Ok(kept);
                 }
-                continue;
             }
             Err(error) => return Err(error),
-        };
-        if let Err(error) = copy.write_all(content).and_then(|()| copy.sync_all()) {
-            drop(copy);
-            // Made by this load, under a name no other file had.
-            let _ = std::fs::remove_file(&kept);
-            return Err(error);
         }
-        return Ok(kept);
     }
     Err(io::Error::other(
         "jot has kept a thousand damaged settings files already",
@@ -303,6 +294,44 @@ mod tests {
         assert_eq!(Settings::load(&file).unwrap(), Settings::default());
         let names = std::fs::read_dir(file.parent().unwrap()).unwrap().count();
         assert_eq!(names, damaged.len() + 2);
+    }
+
+    /// A copy whose write fails leaves the copy another jot kept, and the
+    /// damaged text with it.
+    #[test]
+    fn a_failed_copy_leaves_the_copy_another_jot_kept_meanwhile() {
+        let folder = Folder::new("damaged-copy-fails");
+        let file = folder.file();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let damaged = b"{\"theme\": \"Gruv";
+        std::fs::write(&file, damaged).unwrap();
+        let other = file.clone();
+        crate::file_write::BEFORE_SYNC.set(Some(Box::new(move |_| {
+            // Another jot loads the damaged file meanwhile, and saves its
+            // own settings over it.
+            std::thread::spawn(move || {
+                Settings::load(&other).unwrap();
+                let json = Settings::default().to_json().unwrap();
+                let backups = other.with_file_name("backups");
+                crate::file_write::write_whole(&other, json.as_bytes(), &backups).unwrap();
+            })
+            .join()
+            .unwrap();
+            // And this copy fails, as on a failing disk.
+            Err(io::Error::other("The disk failed"))
+        })));
+
+        assert!(Settings::load(&file).is_err());
+        assert_eq!(Settings::load(&file).unwrap(), Settings::default());
+        let kept = file.with_file_name("settings.damaged.json");
+        assert_eq!(std::fs::read(kept).unwrap(), damaged);
+        let mut names: Vec<String> = std::fs::read_dir(file.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "backups")
+            .collect();
+        names.sort();
+        assert_eq!(names, ["settings.damaged.json", "settings.json"]);
     }
 
     #[test]

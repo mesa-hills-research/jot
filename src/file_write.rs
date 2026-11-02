@@ -56,6 +56,9 @@ type StepIn<T> = std::cell::Cell<Option<Box<dyn FnOnce(&Path) -> T>>>;
 thread_local! {
     /// Runs on this thread just after a staged file has taken its name.
     pub static AFTER_COMMIT: StepIn<()> = const { std::cell::Cell::new(None) };
+    /// Runs on this thread just before a file [`create_whole`] makes is
+    /// synced. An error fails the sync, as a failing disk would.
+    pub static BEFORE_SYNC: StepIn<io::Result<()>> = const { std::cell::Cell::new(None) };
 }
 
 /// How many times a save starts again when another program changes the file
@@ -105,6 +108,26 @@ pub fn update_whole(
         },
         &mut |file| file.write_all(contents.borrow().as_deref().unwrap_or_default()),
     )
+}
+
+/// Makes a new file at `path` with `data`. It takes that name only once it's
+/// whole and synced. Fails with `AlreadyExists`, having changed nothing,
+/// when a file has the name.
+pub fn create_whole(path: &Path, data: &[u8]) -> io::Result<()> {
+    let (staged_path, mut staged) = create_staged(path)?;
+    let created = (|| {
+        staged.write_all(data)?;
+        #[cfg(test)]
+        if let Some(step_in) = BEFORE_SYNC.take() {
+            step_in(path)?;
+        }
+        staged.sync_all()?;
+        rename_to_new_name(&staged_path, path)?;
+        sync_folder(path);
+        Ok(())
+    })();
+    remove_own(&staged_path, &staged);
+    created
 }
 
 /// [`write_whole`], with `write` writing the new contents to the file it's
@@ -262,10 +285,7 @@ fn stage(
     original: Option<&File>,
     write: &mut dyn FnMut(&mut File) -> io::Result<()>,
 ) -> io::Result<Staged> {
-    let (staged_path, mut staged) = create_unique(
-        |n| target.with_file_name(format!(".jot-save-{}-{n}.tmp", std::process::id())),
-        OpenOptions::new().write(true).create_new(true),
-    )?;
+    let (staged_path, mut staged) = create_staged(target)?;
     let committed = (|| {
         // Locked before it takes the name, until this save has checked it
         // and ended, so that a save that opens it under that name waits, as
@@ -323,6 +343,15 @@ fn stage(
     // Gone once it has taken the name, unless that was by a hard link.
     remove_own(&staged_path, &staged);
     committed
+}
+
+/// A new, empty file beside `target`, with a short hidden name of its own,
+/// to write before it takes `target`'s name.
+fn create_staged(target: &Path) -> io::Result<(PathBuf, File)> {
+    create_unique(
+        |n| target.with_file_name(format!(".jot-save-{}-{n}.tmp", std::process::id())),
+        OpenOptions::new().write(true).create_new(true),
+    )
 }
 
 /// Gives `staged` the owner, group and permissions of `original`, and
