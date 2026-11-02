@@ -1,0 +1,73 @@
+name: CI
+on:
+  pull_request:
+  push:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Debug info is most of a build's disk footprint and a large share of its
+  # link time, and nothing in CI reads it. Leaving it out keeps the dependency
+  # caches small enough to stay under the repository's 10 GB cache limit.
+  CARGO_PROFILE_DEV_DEBUG: 0
+
+# The Test job relies on the dependency cache that
+# `actions-rust-lang/setup-rust-toolchain` installs (Swatinem/rust-cache).
+# Only `main` saves caches. Other branches and pull requests restore the
+# closest `main` cache, so they never crowd it out of the 10 GB limit.
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+          cache: false
+      - run: cargo fmt --check
+
+  test:
+    name: Test (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            run_on: ubuntu-latest
+          - name: Windows
+            run_on: windows-latest
+          - name: macOS
+            run_on: macos-latest
+    runs-on: ${{ matrix.run_on }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Headers for GPUI's Linux platform. Jot's tests run on GPUI's test
+      # platform, so no display is needed.
+      - name: Install system dependencies
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig-dev libwayland-dev libxkbcommon-x11-dev
+      # mhr-gpui-apple's build script compiles its shaders with Xcode's Metal
+      # compiler, which Xcode 26 installs as a separate component.
+      - name: Install the Metal toolchain
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          if ! xcrun -sdk macosx metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun -sdk macosx metal --version
+          fi
+      # Clippy type-checks every target it lints, so it stands in for
+      # `cargo check`.
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --locked
