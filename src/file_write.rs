@@ -453,14 +453,14 @@ fn create_backup(backups: &Path, target: &Path) -> io::Result<(PathBuf, File)> {
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut folder, 0o700);
     folder.create(backups)?;
-    // Short enough that the whole name fits where the file's own did.
-    let name: String = target
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .chars()
-        .take(64)
-        .collect();
+    // The file's name, cut to 64 bytes where a character ends, so that the
+    // whole name fits wherever the file's own did.
+    let name = target.file_name().unwrap_or_default().to_string_lossy();
+    let mut end = name.len().min(64);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    let name = &name[..end];
     let mut options = OpenOptions::new();
     options.read(true).write(true).create_new(true);
     #[cfg(unix)]
@@ -1330,6 +1330,30 @@ mod tests {
             .unwrap();
         assert_eq!(fs::read_to_string(&link).unwrap(), "new");
         assert_eq!(folder.names(), ["link.txt", "second.txt"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_with_a_long_name_in_other_scripts_is_saved() {
+        // 244 bytes, of 60 characters of four bytes each.
+        let names = [format!("{}.txt", "\u{1f4dd}".repeat(60))];
+        #[cfg(target_os = "linux")]
+        let names = {
+            use std::os::unix::ffi::OsStringExt;
+            // 250 bytes that aren't UTF-8, which Linux allows in a name.
+            let other = std::ffi::OsString::from_vec(vec![0xff; 250]);
+            [names[0].clone().into(), other]
+        };
+        for name in names {
+            let folder = Folder::new("long-scripts");
+            let file = folder.files().join(&name);
+            fs::write(&file, "old").unwrap();
+            // Written in place, after a copy of it named after it.
+            fs::hard_link(&file, folder.path("other.txt")).unwrap();
+            folder.save(&file, b"new").unwrap();
+            assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+            assert!(folder.backups_left().is_empty());
+        }
     }
 
     #[cfg(target_os = "linux")]
