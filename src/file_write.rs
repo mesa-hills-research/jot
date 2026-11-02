@@ -16,8 +16,9 @@
 //!   extended attributes.
 //! - Saves of one file by programs that use this module, jot in other
 //!   processes included, take turns. Each locks the file from start to end,
-//!   so their writes never mix and none puts old contents back over
-//!   another's.
+//!   and the new file that takes its name from before then until the save
+//!   ends. So their writes never mix, none puts old contents back over
+//!   another's, and an update never runs twice.
 //! - When another program moves, replaces, relinks or changes the file's
 //!   permissions during a save, the save notices before its change takes
 //!   effect, puts back what it changed, and starts again on what the path
@@ -46,6 +47,16 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
+
+/// What a test does at a point in a save, as another program might then.
+#[cfg(test)]
+type StepIn<T> = std::cell::Cell<Option<Box<dyn FnOnce(&Path) -> T>>>;
+
+#[cfg(test)]
+thread_local! {
+    /// Runs on this thread just after a staged file has taken its name.
+    pub static AFTER_COMMIT: StepIn<()> = const { std::cell::Cell::new(None) };
+}
 
 /// How many times a save starts again when another program changes the file
 /// or puts another in its place.
@@ -243,7 +254,8 @@ enum Staged {
 /// Writes the new contents to a temporary file beside `target`, which then
 /// takes its name. With an `original`, which `target` names and this save
 /// has locked, the new file takes its place. Without one, it takes a name
-/// nothing has, and the save starts again if something takes it first.
+/// nothing has, and the save starts again if something takes it first. The
+/// new file is locked until this returns.
 fn stage(
     path: &Path,
     target: &Path,
@@ -255,6 +267,10 @@ fn stage(
         OpenOptions::new().write(true).create_new(true),
     )?;
     let committed = (|| {
+        // Locked before it takes the name, until this save has checked it
+        // and ended, so that a save that opens it under that name waits, as
+        // it would for the file it replaces.
+        staged.lock()?;
         #[cfg(target_os = "linux")]
         let before = original.map(access).transpose()?;
         #[cfg(target_os = "linux")]
@@ -293,6 +309,10 @@ fn stage(
             }
         }
         sync_folder(target);
+        #[cfg(test)]
+        if let Some(step_in) = AFTER_COMMIT.take() {
+            step_in(target);
+        }
         // A program may have moved it, or pointed a link elsewhere, in the
         // last instant. The file stays where it went.
         if !is_named_by(path, target, &staged)? {
@@ -1128,6 +1148,52 @@ mod tests {
                 .unwrap_err();
             assert!(!is_held(&file), "linked: {linked}");
             assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+        }
+    }
+
+    #[test]
+    fn an_update_holds_the_file_it_made_until_it_has_checked_it() {
+        for existing in [false, true] {
+            let folder = Folder::new(if existing {
+                "handoff-existing"
+            } else {
+                "handoff-new"
+            });
+            let file = folder.path("count.txt");
+            if existing {
+                fs::write(&file, "0").unwrap();
+            }
+            let add_one = |old: Option<Vec<u8>>| {
+                let count: usize =
+                    old.map_or(0, |old| String::from_utf8_lossy(&old).parse().unwrap());
+                Some((count + 1).to_string().into_bytes())
+            };
+            let (held_sender, held) = mpsc::channel();
+            let (other_sender, other) = mpsc::channel();
+            let backups = folder.backups();
+            AFTER_COMMIT.set(Some(Box::new(move |target| {
+                let _ = held_sender.send(is_held(target));
+                // Another jot adds one just after the new file takes its name.
+                let (target, backups) = (target.to_path_buf(), backups.clone());
+                let (done_sender, done) = mpsc::channel();
+                let update = thread::spawn(move || {
+                    let updated = update_whole(&target, &backups, add_one);
+                    let _ = done_sender.send(());
+                    updated
+                });
+                // It ends at once unless it has to wait for this save.
+                let _ = done.recv_timeout(Duration::from_millis(300));
+                let _ = other_sender.send(update);
+            })));
+            update_whole(&file, &folder.backups(), add_one).unwrap();
+            let held = held.recv().unwrap();
+            other.recv().unwrap().join().unwrap().unwrap();
+            assert!(held, "the new file wasn't locked, existing: {existing}");
+            assert_eq!(
+                fs::read_to_string(&file).unwrap(),
+                "2",
+                "existing: {existing}"
+            );
         }
     }
 
