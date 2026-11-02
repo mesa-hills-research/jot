@@ -206,7 +206,7 @@ impl AppState {
                         let saved =
                             on_own_thread(move || save_settings(&settings, &path, &write)).await;
                         if let Err(error) = saved {
-                            log::error!("Couldn\u{2019}t save the settings: {error}");
+                            log::error!("Couldn\u{2019}t save the settings. {error}");
                         }
                     }
                 });
@@ -359,7 +359,7 @@ fn load_settings() -> (Settings, Option<PathBuf>) {
         Ok(settings) => (settings, Some(path)),
         Err(error) => {
             log::error!(
-                "Couldn\u{2019}t read the settings in {}, so jot won\u{2019}t save them this time: {error}",
+                "Couldn\u{2019}t read the settings in {}, so jot won\u{2019}t save them this time. {error}",
                 path.display()
             );
             (Settings::default(), None)
