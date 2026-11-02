@@ -161,7 +161,7 @@ impl AppState {
                 if let Some(previous) = previous {
                     previous.await;
                 }
-                if let Err(error) = settings.save_to(&path) {
+                if let Err(error) = settings.save_to(&path, &backup_folder()) {
                     log::error!(
                         "Couldn\u{2019}t save the settings to {}: {error}",
                         path.display()
@@ -258,6 +258,16 @@ impl AppState {
         self.settings.theme = name;
         self.settings_changed(cx);
     }
+}
+
+/// Where jot keeps a copy of a file while it writes the file in place, to
+/// put back if the write fails. The folder is the user's alone, and a copy
+/// is removed once its save is done.
+pub fn backup_folder() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("jot")
+        .join("backups")
 }
 
 /// The saved settings, and the file to save them to. A file that can't be

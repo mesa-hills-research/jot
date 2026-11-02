@@ -1,156 +1,277 @@
 //! Saving a file whole, so that a save that fails leaves the file as it was.
 //!
-//! The new contents go to a temporary file beside the old one, which then
-//! takes its place, so the file holds the old contents or the new and never
-//! part of either. A save through a symbolic link writes the file the link
-//! points to and leaves the link. The file keeps its permissions and, where
-//! the system allows, its owner.
+//! A save locks the file from start to end, so that two saves of one file,
+//! from one program or two that lock it the same way, take turns. Before
+//! it changes anything, and again before the change takes effect, it checks
+//! that the path still leads to the file it locked. When a program put
+//! another file in its place meanwhile, the save puts back what it changed
+//! and starts again on that file.
 //!
-//! A file with other names (hard links) would lose them to a new file, and
-//! so would a file whose owner the new one can't take. Such a file is
-//! written in place instead, after a copy of it is made beside it. If the
-//! write fails partway, the copy is put back.
+//! On Linux a file is saved by writing a temporary file beside it, which
+//! then takes its place, so the file holds the old contents or the new and
+//! never part of either. That's done only when the new file can have the
+//! old one's owner, group, permissions and extended attributes, which hold
+//! its ACL and security label, so that the same people may read and change
+//! it. Otherwise, and on other systems, the file is written in place, after
+//! a copy of it is made in a folder of the caller's. If the write fails
+//! partway, the copy is put back. If that fails too, the error says where
+//! the copy is.
+//!
+//! A save through a symbolic link writes the file the link points to and
+//! leaves the link.
 
-use std::fs::{self, File, Metadata, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+
+/// How many times a save starts again on a file put in the place of the
+/// one it was saving.
+const ATTEMPTS: usize = 8;
 
 /// Replaces the contents of the file at `path` with `data`, or makes the
-/// file. The folder must exist.
-pub fn write_whole(path: &Path, data: &[u8]) -> io::Result<()> {
-    write_whole_with(path, &mut |file| file.write_all(data))
+/// file. The folder must exist. A file written in place is first copied
+/// into `backups`, which is made if need be and should be the user's alone.
+pub fn write_whole(path: &Path, data: &[u8], backups: &Path) -> io::Result<()> {
+    write_whole_with(path, backups, &mut |file| file.write_all(data))
 }
 
 /// [`write_whole`], with `write` writing the new contents to the file it's
-/// given. It's called once.
+/// given, each time the save starts.
 fn write_whole_with(
     path: &Path,
+    backups: &Path,
     write: &mut dyn FnMut(&mut File) -> io::Result<()>,
 ) -> io::Result<()> {
-    let target = follow_links(path)?;
-    // Opening the file for writing fails as writing it would, for a
-    // read-only file or one another program holds, so that replacing it
-    // doesn't get around that.
-    let original = match OpenOptions::new().read(true).write(true).open(&target) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return write_and_replace(&target, None, write).map(|_| ());
+    let mut attempts = 0;
+    while attempts < ATTEMPTS {
+        attempts += 1;
+        let target = follow_links(path)?;
+        let (mut file, readable) = match open_to_write(&target) {
+            Ok(opened) => opened,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                match write_new(&target, write) {
+                    // Another file took the name first.
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                    written => return written,
+                }
+            }
+            Err(error) => return Err(error),
+        };
+        // Waits for a save of the same file, by this program or another, to
+        // end. shortcut: Linux turns these locks into ones per process on
+        // NFS, so there two saves in one process don't wait for each other.
+        // Add a lock per file within the process if that comes up.
+        let waited = match file.try_lock() {
+            Ok(()) => false,
+            Err(fs::TryLockError::WouldBlock) => {
+                file.lock()?;
+                true
+            }
+            Err(fs::TryLockError::Error(error)) => return Err(error),
+        };
+        let named = is_named_by(path, &target, &file)?;
+        if named && save_locked(path, &target, &mut file, readable, backups, write)? {
+            return Ok(());
         }
-        Err(error) => return Err(error),
-    };
-    if link_count(&original)? > 1 {
-        return write_in_place(&target, original, write);
+        // The save waited for may have put a new file in this one's place,
+        // which is no reason to give up.
+        if !named && waited {
+            attempts -= 1;
+        }
     }
-    let metadata = original.metadata()?;
-    // Closed first, so that Windows lets the new file take its place.
-    drop(original);
-    if write_and_replace(&target, Some(&metadata), write)? {
-        return Ok(());
-    }
-    let original = OpenOptions::new().read(true).write(true).open(&target)?;
-    write_in_place(&target, original, write)
+    Err(io::Error::other(
+        "Another program kept putting other files in its place",
+    ))
 }
 
 /// `path`, or the file its symbolic links lead to.
 fn follow_links(path: &Path) -> io::Result<PathBuf> {
-    let mut path = path.to_path_buf();
-    // As many links as Linux follows.
-    for _ in 0..40 {
-        match fs::symlink_metadata(&path) {
+    // As many as Linux follows.
+    const MOST_LINKS: usize = 40;
+    let mut target = path.to_path_buf();
+    for links in 0..=MOST_LINKS {
+        match fs::symlink_metadata(&target) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                let link = fs::read_link(&path)?;
-                path = match path.parent() {
+                if links == MOST_LINKS {
+                    break;
+                }
+                let link = fs::read_link(&target)?;
+                target = match target.parent() {
                     Some(folder) => folder.join(link),
                     None => link,
                 };
             }
             Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-            _ => return Ok(path),
+            _ => return Ok(target),
         }
     }
     Err(io::Error::other(format!(
-        "{} is a symbolic link in a loop",
+        "{} leads through more than {MOST_LINKS} symbolic links",
         path.display()
     )))
 }
 
-/// Writes a temporary file beside `target` and renames it over `target`.
-/// The new file takes `original`'s owner and permissions. Returns `false`,
-/// having changed nothing, when it can't take the owner.
-fn write_and_replace(
+/// Opens the file at `target` to write it, and to read it as well where
+/// that's allowed, and says whether it may be read. Opening it to write
+/// fails as writing it would, for a read-only file or one another program
+/// holds, so that replacing it doesn't get around that.
+fn open_to_write(target: &Path) -> io::Result<(File, bool)> {
+    match OpenOptions::new().read(true).write(true).open(target) {
+        Ok(file) => Ok((file, true)),
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => OpenOptions::new()
+            .write(true)
+            .open(target)
+            .map(|file| (file, false)),
+        Err(error) => Err(error),
+    }
+}
+
+/// Makes the file `target` with what `write` writes. Fails with
+/// `AlreadyExists`, having changed nothing, when a file has that name.
+fn write_new(target: &Path, write: &mut dyn FnMut(&mut File) -> io::Result<()>) -> io::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)?;
+    // A save of the same new file from elsewhere waits for this one.
+    let written = file
+        .lock()
+        .and_then(|()| write(&mut file))
+        .and_then(|()| file.sync_all());
+    if let Err(error) = written {
+        // Removed while it's locked, so no other save writes it first.
+        remove_leftover(target);
+        return Err(error);
+    }
+    drop(file);
+    sync_folder(target);
+    Ok(())
+}
+
+/// Saves `file`, which `target` names and which this save has locked.
+/// Returns `false`, having put back anything it changed, when a program put
+/// another file in `target`'s place meanwhile.
+fn save_locked(
+    path: &Path,
     target: &Path,
-    original: Option<&Metadata>,
+    file: &mut File,
+    readable: bool,
+    backups: &Path,
     write: &mut dyn FnMut(&mut File) -> io::Result<()>,
 ) -> io::Result<bool> {
-    let (temporary_path, mut temporary) = create_temporary(target)?;
-    let written = (|| {
-        if let Some(original) = original {
-            if !take_owner(&temporary, original) {
-                return Ok(false);
-            }
-            // After the owner, since changing the owner can clear the setuid
-            // and setgid bits.
-            temporary.set_permissions(original.permissions())?;
+    #[cfg(target_os = "linux")]
+    if let Some(replaced) = replace(path, target, file, write)? {
+        return Ok(replaced);
+    }
+    if !readable {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "It can be written but not read, so it can\u{2019}t be copied before it\u{2019}s written",
+        ));
+    }
+    write_in_place(path, target, file, backups, write)
+}
+
+/// Writes a temporary file beside `target` that takes the place of
+/// `original`, which `target` names, when the new file can have all that
+/// decides who may read or change it. Returns `None`, having changed
+/// nothing, when it can't, and `Some(false)`, having changed nothing, when a
+/// program put another file in `target`'s place meanwhile.
+#[cfg(target_os = "linux")]
+fn replace(
+    path: &Path,
+    target: &Path,
+    original: &File,
+    write: &mut dyn FnMut(&mut File) -> io::Result<()>,
+) -> io::Result<Option<bool>> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = original.metadata()?;
+    // The file's other names would keep the old contents.
+    if metadata.nlink() > 1 {
+        return Ok(None);
+    }
+    let (temporary_path, mut temporary) = create_unique(
+        |n| target.with_file_name(format!(".jot-save-{}-{n}.tmp", std::process::id())),
+        OpenOptions::new().write(true).create_new(true),
+    )?;
+    let replaced = (|| {
+        if !take_owner(&temporary, &metadata) {
+            return Ok(None);
+        }
+        // After the owner, since changing the owner can clear the setuid
+        // and setgid bits.
+        temporary.set_permissions(metadata.permissions())?;
+        // After the permissions, which change an ACL's mask.
+        if !same_extended_attributes(original, &temporary) {
+            return Ok(None);
         }
         write(&mut temporary)?;
         temporary.sync_all()?;
-        Ok(true)
+        if !is_named_by(path, target, original)? {
+            return Ok(Some(false));
+        }
+        fs::rename(&temporary_path, target)?;
+        sync_folder(target);
+        Ok(Some(true))
     })();
     drop(temporary);
-    let replaced = written.and_then(|written| {
-        if written {
-            replace(&temporary_path, target)?;
-            sync_folder(target);
-        }
-        Ok(written)
-    });
-    if !matches!(replaced, Ok(true)) {
-        let _ = fs::remove_file(&temporary_path);
+    if !matches!(replaced, Ok(Some(true))) {
+        remove_leftover(&temporary_path);
     }
     replaced
 }
 
-/// Writes `file`, which is `target`, in place, after copying it beside
-/// itself. The copy is put back if the write fails.
+/// Writes `file`, which `target` names, in place, after copying it into
+/// `backups`. The copy is put back if the write fails or a program puts
+/// another file in `target`'s place meanwhile, and is removed once the copy
+/// is no longer needed. Returns `false` in the second case.
 fn write_in_place(
+    path: &Path,
     target: &Path,
-    mut file: File,
+    file: &mut File,
+    backups: &Path,
     write: &mut dyn FnMut(&mut File) -> io::Result<()>,
-) -> io::Result<()> {
-    let (backup_path, mut backup) = create_temporary(target)?;
+) -> io::Result<bool> {
+    let (backup_path, mut backup) = create_backup(backups, target)?;
     let copied = (|| {
-        // Readable only by whom the file is.
-        backup.set_permissions(file.metadata()?.permissions())?;
-        io::copy(&mut file, &mut backup)?;
-        backup.sync_all()
+        file.seek(SeekFrom::Start(0))?;
+        io::copy(file, &mut backup)?;
+        backup.sync_all()?;
+        sync_folder(&backup_path);
+        Ok(())
     })();
     if let Err(error) = copied {
         drop(backup);
-        let _ = fs::remove_file(&backup_path);
+        remove_leftover(&backup_path);
         return Err(error);
     }
-    let Err(error) = overwrite(&mut file, write) else {
+    let written = overwrite(file, write).and_then(|()| is_named_by(path, target, file));
+    if let Ok(true) = written {
         drop(backup);
-        let _ = fs::remove_file(&backup_path);
-        return Ok(());
-    };
+        remove_leftover(&backup_path);
+        return Ok(true);
+    }
     let restored = backup
         .seek(SeekFrom::Start(0))
-        .and_then(|_| overwrite(&mut file, &mut |file| io::copy(&mut backup, file).map(drop)));
+        .and_then(|_| overwrite(file, &mut |file| io::copy(&mut backup, file).map(drop)));
     drop(backup);
     match restored {
         Ok(()) => {
-            let _ = fs::remove_file(&backup_path);
-            Err(error)
+            remove_leftover(&backup_path);
+            written
         }
-        Err(_) => Err(io::Error::new(
-            error.kind(),
-            format!(
-                "{error}. The file as it was is in {}.",
-                backup_path.display()
-            ),
-        )),
+        Err(_) => {
+            let error = written.err().unwrap_or_else(|| {
+                io::Error::other("Another program put a file in its place during the save")
+            });
+            Err(io::Error::new(
+                error.kind(),
+                format!(
+                    "{error}. Its contents from before the save are in {}",
+                    backup_path.display()
+                ),
+            ))
+        }
     }
 }
 
@@ -166,30 +287,140 @@ fn overwrite(
     file.sync_all()
 }
 
-/// A new file beside `target`, named after it and hidden on Unix.
-fn create_temporary(target: &Path) -> io::Result<(PathBuf, File)> {
-    let name = target.file_name().unwrap_or_default().to_string_lossy();
-    for attempt in 0.. {
-        let path = target.with_file_name(format!(".{name}.{}-{attempt}.tmp", std::process::id()));
-        match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            // One left behind by an earlier jot with the same process id.
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists && attempt < 100 => {}
+/// A new, empty file in `backups`, which only this user may read, named
+/// after `target` so that it can be told apart.
+fn create_backup(backups: &Path, target: &Path) -> io::Result<(PathBuf, File)> {
+    let mut folder = fs::DirBuilder::new();
+    folder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut folder, 0o700);
+    folder.create(backups)?;
+    // Short enough that the whole name fits where the file's own did.
+    let name: String = target
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .chars()
+        .take(64)
+        .collect();
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    create_unique(
+        |n| backups.join(format!("{name}-{}-{n}.backup", std::process::id())),
+        &options,
+    )
+}
+
+/// Makes a new file with `options`, at the first of `path(0)`, `path(1)`
+/// and so on that's free.
+fn create_unique(
+    path: impl Fn(u32) -> PathBuf,
+    options: &OpenOptions,
+) -> io::Result<(PathBuf, File)> {
+    let mut n = 0;
+    loop {
+        let path = path(n);
+        match options.open(&path) {
+            // One left by an earlier program with the same process id, or
+            // made by another save of this one's.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists && n < 1000 => n += 1,
             opened => return opened.map(|file| (path, file)),
         }
     }
-    unreachable!()
+}
+
+/// Removes a file this save made and no longer needs. One that stays is
+/// noted in the log. Its name says what made it.
+fn remove_leftover(path: &Path) {
+    if let Err(error) = fs::remove_file(path)
+        && error.kind() != io::ErrorKind::NotFound
+    {
+        log::warn!("Couldn\u{2019}t remove {}: {error}", path.display());
+    }
+}
+
+/// Whether `target` is `file`, and `path`, through its links, leads to it,
+/// so that no program put another file in their place since `file` was
+/// opened.
+fn is_named_by(path: &Path, target: &Path, file: &File) -> io::Result<bool> {
+    let file = Some(file_identity(file)?);
+    Ok(path_identity(target, false)? == file && path_identity(path, true)? == file)
+}
+
+/// What tells a file apart from every other on the system.
+#[cfg(unix)]
+type Identity = (u64, u64);
+
+#[cfg(unix)]
+fn file_identity(file: &File) -> io::Result<Identity> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+/// The identity of the file at `path`, or of the link there unless
+/// `follow`, and `None` when nothing is there.
+#[cfg(unix)]
+fn path_identity(path: &Path, follow: bool) -> io::Result<Option<Identity>> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = if follow {
+        fs::metadata(path)
+    } else {
+        fs::symlink_metadata(path)
+    };
+    match metadata {
+        Ok(metadata) => Ok(Some((metadata.dev(), metadata.ino()))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// What tells a file apart from every other on the system: its volume and
+/// its index there.
+#[cfg(windows)]
+type Identity = (u32, u64);
+
+#[cfg(windows)]
+fn file_identity(file: &File) -> io::Result<Identity> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: the handle is the open file's, and `info` outlives the call.
+    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }?;
+    let index = u64::from(info.nFileIndexHigh) << 32 | u64::from(info.nFileIndexLow);
+    Ok((info.dwVolumeSerialNumber, index))
+}
+
+/// The identity of the file at `path`, or of the link there unless
+/// `follow`, and `None` when nothing is there.
+#[cfg(windows)]
+fn path_identity(path: &Path, follow: bool) -> io::Result<Option<Identity>> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+    let mut options = OpenOptions::new();
+    // No access but to what the handle tells, so that a file another
+    // program holds opens too.
+    options.access_mode(0);
+    if !follow {
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0);
+    }
+    match options.open(path) {
+        Ok(file) => file_identity(&file).map(Some),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// Gives `file` the owner and group of `original`, and returns whether it
 /// has them. Only the superuser may give a file away, while anyone may give
 /// one of their own files to a group they belong to.
-#[cfg(unix)]
-fn take_owner(file: &File, original: &Metadata) -> bool {
+#[cfg(target_os = "linux")]
+fn take_owner(file: &File, original: &fs::Metadata) -> bool {
     use std::os::unix::fs::{MetadataExt, fchown};
     let owner = (original.uid(), original.gid());
     let has_owner = |file: &File| {
@@ -201,67 +432,76 @@ fn take_owner(file: &File, original: &Metadata) -> bool {
         || (fchown(file, None, Some(owner.1)).is_ok() && has_owner(file))
 }
 
-#[cfg(not(unix))]
-fn take_owner(_: &File, _: &Metadata) -> bool {
-    true
+/// Whether `a` and `b` have the same extended attributes, which on Linux
+/// hold a file's ACL and security label. Those this user may not list,
+/// such as `trusted` ones, aren't compared.
+#[cfg(target_os = "linux")]
+fn same_extended_attributes(a: &File, b: &File) -> bool {
+    matches!(
+        (extended_attributes(a), extended_attributes(b)),
+        (Ok(a), Ok(b)) if a == b
+    )
 }
 
-/// How many names the file has.
-#[cfg(unix)]
-fn link_count(file: &File) -> io::Result<u64> {
-    use std::os::unix::fs::MetadataExt;
-    Ok(file.metadata()?.nlink())
-}
-
-#[cfg(windows)]
-fn link_count(file: &File) -> io::Result<u64> {
-    use std::os::windows::io::AsRawHandle;
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+/// The names and values of `file`'s extended attributes, by name.
+#[cfg(target_os = "linux")]
+fn extended_attributes(file: &File) -> io::Result<Vec<(Vec<u8>, Vec<u8>)>> {
+    use std::os::fd::AsRawFd;
+    let fd = file.as_raw_fd();
+    // SAFETY: the buffer is as long as the length given with it.
+    let names = read_sized(|buffer, length| unsafe { libc::flistxattr(fd, buffer.cast(), length) });
+    let names = match names {
+        // A file system that keeps none.
+        Err(error) if error.raw_os_error() == Some(libc::ENOTSUP) => Vec::new(),
+        names => names?,
     };
-    let mut info = BY_HANDLE_FILE_INFORMATION::default();
-    // SAFETY: the handle is the open file's, and `info` outlives the call.
-    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }?;
-    Ok(info.nNumberOfLinks.into())
+    let mut attributes = Vec::new();
+    for name in names
+        .split(|&byte| byte == 0)
+        .filter(|name| !name.is_empty())
+    {
+        let name = std::ffi::CString::new(name)?;
+        // SAFETY: as above, and `name` ends with a nul.
+        let value = read_sized(|buffer, length| unsafe {
+            libc::fgetxattr(fd, name.as_ptr(), buffer.cast(), length)
+        })?;
+        attributes.push((name.into_bytes(), value));
+    }
+    attributes.sort();
+    Ok(attributes)
 }
 
-#[cfg(not(any(unix, windows)))]
-fn link_count(_: &File) -> io::Result<u64> {
-    Ok(1)
-}
-
-/// Renames `from` over `to`. On Windows another program, such as a virus
-/// scanner, may hold either file for a moment, so a refusal is tried again,
-/// for about 600 ms in all.
-fn replace(from: &Path, to: &Path) -> io::Result<()> {
-    const WAITS_MS: [u64; 6] = [10, 20, 40, 80, 160, 320];
-    let mut waits = WAITS_MS.iter();
+/// What `read` reads into a buffer of the length it says it needs when
+/// given none, asking again when that grew in between.
+#[cfg(target_os = "linux")]
+fn read_sized(read: impl Fn(*mut u8, usize) -> isize) -> io::Result<Vec<u8>> {
     loop {
-        match fs::rename(from, to) {
-            Err(error) if is_held_elsewhere(&error) => match waits.next() {
-                Some(&wait) => std::thread::sleep(Duration::from_millis(wait)),
-                None => return Err(error),
-            },
-            result => return result,
+        let needed = usize::try_from(read(std::ptr::null_mut(), 0))
+            .map_err(|_| io::Error::last_os_error())?;
+        let mut buffer = vec![0; needed];
+        match usize::try_from(read(buffer.as_mut_ptr(), buffer.len())) {
+            Ok(length) => {
+                buffer.truncate(length);
+                return Ok(buffer);
+            }
+            Err(_) => {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::ERANGE) {
+                    return Err(error);
+                }
+            }
         }
     }
 }
 
-/// Whether Windows refused a rename because another program has the file
-/// open, which shows as access denied, a sharing violation or a lock
-/// violation.
-fn is_held_elsewhere(error: &io::Error) -> bool {
-    cfg!(windows) && matches!(error.raw_os_error(), Some(5 | 32 | 33))
-}
-
-/// Makes the rename of a file in `target`'s folder last through a power cut.
-/// The save is done by then, and some file systems can't sync a folder, so a
-/// failure is ignored. Windows syncs no folders.
-fn sync_folder(target: &Path) {
+/// Makes the name of a file in `path`'s folder, just made or renamed, last
+/// through a power cut. The file's contents are synced by then, and some
+/// file systems can't sync a folder, so a failure is ignored. Windows syncs
+/// no folders.
+fn sync_folder(path: &Path) {
     #[cfg(unix)]
     {
-        let folder = match target.parent() {
+        let folder = match path.parent() {
             Some(folder) if !folder.as_os_str().is_empty() => folder,
             _ => Path::new("."),
         };
@@ -270,16 +510,22 @@ fn sync_folder(target: &Path) {
         }
     }
     #[cfg(not(unix))]
-    let _ = target;
+    let _ = path;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::io::Read as _;
     use std::path::PathBuf;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
 
-    /// A folder of its own for a test, removed afterwards.
+    /// Folders of its own for a test, removed afterwards. One holds the
+    /// files it saves, and one the copies kept while they're written in
+    /// place.
     struct Folder(PathBuf);
 
     impl Folder {
@@ -287,22 +533,42 @@ mod tests {
             let folder = std::env::temp_dir()
                 .join(format!("jot-file-write-test-{name}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&folder);
-            fs::create_dir_all(&folder).unwrap();
+            fs::create_dir_all(folder.join("files")).unwrap();
             Self(folder)
         }
 
-        fn path(&self, name: &str) -> PathBuf {
-            self.0.join(name)
+        fn files(&self) -> PathBuf {
+            self.0.join("files")
         }
 
-        /// The names in the folder, sorted.
+        fn path(&self, name: &str) -> PathBuf {
+            self.files().join(name)
+        }
+
+        fn backups(&self) -> PathBuf {
+            self.0.join("backups")
+        }
+
+        /// The names in the files' folder, sorted.
         fn names(&self) -> Vec<String> {
-            let mut names: Vec<String> = fs::read_dir(&self.0)
-                .unwrap()
-                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-                .collect();
-            names.sort();
-            names
+            names_in(&self.files())
+        }
+
+        /// The copies left in the backups folder, sorted.
+        fn backups_left(&self) -> Vec<String> {
+            names_in(&self.backups())
+        }
+
+        fn save(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+            write_whole(path, data, &self.backups())
+        }
+
+        fn save_with(
+            &self,
+            path: &Path,
+            write: &mut dyn FnMut(&mut File) -> io::Result<()>,
+        ) -> io::Result<()> {
+            write_whole_with(path, &self.backups(), write)
         }
     }
 
@@ -310,6 +576,18 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// The names in `folder`, sorted. None for a folder that isn't there.
+    fn names_in(folder: &Path) -> Vec<String> {
+        let Ok(entries) = fs::read_dir(folder) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = entries
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
     }
 
     /// Writes the first half of `data`, then fails, as a full disk would.
@@ -320,17 +598,32 @@ mod tests {
         }
     }
 
+    /// Whether a save holds the file at `path`, so that another handle can't
+    /// lock it.
+    fn is_held(path: &Path) -> bool {
+        let file = File::open(path).unwrap();
+        matches!(file.try_lock(), Err(fs::TryLockError::WouldBlock))
+    }
+
+    #[cfg(unix)]
+    fn is_root() -> bool {
+        // SAFETY: geteuid has no preconditions.
+        unsafe { libc::geteuid() == 0 }
+    }
+
     #[test]
     fn a_failed_save_leaves_the_file_as_it_was() {
         let folder = Folder::new("failed");
         let file = folder.path("notes.txt");
         fs::write(&file, "old text").unwrap();
 
-        let error = write_whole_with(&file, &mut fail_halfway(b"new text, longer than the old"))
+        let error = folder
+            .save_with(&file, &mut fail_halfway(b"new text, longer than the old"))
             .unwrap_err();
         assert_eq!(error.to_string(), "the disk is full");
         assert_eq!(fs::read_to_string(&file).unwrap(), "old text");
         assert_eq!(folder.names(), ["notes.txt"]);
+        assert!(folder.backups_left().is_empty());
     }
 
     #[test]
@@ -341,12 +634,48 @@ mod tests {
         fs::write(&file, "old text").unwrap();
         fs::hard_link(&file, &other).unwrap();
 
-        let error = write_whole_with(&file, &mut fail_halfway(b"new text, longer than the old"))
+        let error = folder
+            .save_with(&file, &mut fail_halfway(b"new text, longer than the old"))
             .unwrap_err();
         assert_eq!(error.to_string(), "the disk is full");
         assert_eq!(fs::read_to_string(&file).unwrap(), "old text");
         assert_eq!(fs::read_to_string(&other).unwrap(), "old text");
         assert_eq!(folder.names(), ["notes.txt", "other.txt"]);
+        assert!(folder.backups_left().is_empty());
+    }
+
+    #[test]
+    fn a_save_that_keeps_failing_keeps_the_copy_and_says_where() {
+        let folder = Folder::new("keeps-failing");
+        let file = folder.path("notes.txt");
+        fs::write(&file, "old text").unwrap();
+        // A file with another name is written in place on every system.
+        fs::hard_link(&file, folder.path("other.txt")).unwrap();
+
+        let error = folder
+            .save_with(&file, &mut |written| {
+                written.write_all(b"new")?;
+                // Every write fails from here on, putting the old text back
+                // too, as on a disk that stays full.
+                *written = File::open(&file)?;
+                Err(io::Error::other("The disk is full"))
+            })
+            .unwrap_err();
+        let kept = folder.backups_left();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert!(kept[0].starts_with("notes.txt"), "{kept:?}");
+        let backup = folder.backups().join(&kept[0]);
+        assert_eq!(fs::read_to_string(&backup).unwrap(), "old text");
+        assert!(
+            error.to_string().contains(&backup.display().to_string()),
+            "{error}"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&backup).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "{mode:o}");
+        }
     }
 
     #[cfg(unix)]
@@ -358,7 +687,7 @@ mod tests {
         fs::write(folder.path("real.txt"), "old").unwrap();
         symlink("real.txt", &link).unwrap();
 
-        write_whole(&link, b"new").unwrap();
+        folder.save(&link, b"new").unwrap();
         assert!(
             fs::symlink_metadata(&link)
                 .unwrap()
@@ -371,7 +700,7 @@ mod tests {
         // A link to a file that doesn't exist yet makes the file.
         let dangling = folder.path("dangling.txt");
         symlink(folder.path("made.txt"), &dangling).unwrap();
-        write_whole(&dangling, b"made").unwrap();
+        folder.save(&dangling, b"made").unwrap();
         assert!(
             fs::symlink_metadata(&dangling)
                 .unwrap()
@@ -385,6 +714,23 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn forty_links_lead_to_the_file_and_a_forty_first_is_too_many() {
+        use std::os::unix::fs::symlink;
+        let folder = Folder::new("forty-links");
+        fs::write(folder.path("real.txt"), "old").unwrap();
+        symlink("real.txt", folder.path("link-1")).unwrap();
+        for n in 2..=41 {
+            symlink(format!("link-{}", n - 1), folder.path(&format!("link-{n}"))).unwrap();
+        }
+
+        folder.save(&folder.path("link-40"), b"new").unwrap();
+        assert_eq!(fs::read_to_string(folder.path("real.txt")).unwrap(), "new");
+        assert!(folder.save(&folder.path("link-41"), b"newer").is_err());
+        assert_eq!(fs::read_to_string(folder.path("real.txt")).unwrap(), "new");
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_save_keeps_the_files_permissions() {
@@ -394,7 +740,7 @@ mod tests {
         for mode in [0o600, 0o640, 0o755] {
             fs::write(&file, "old").unwrap();
             fs::set_permissions(&file, fs::Permissions::from_mode(mode)).unwrap();
-            write_whole(&file, b"new").unwrap();
+            folder.save(&file, b"new").unwrap();
             assert_eq!(fs::read_to_string(&file).unwrap(), "new");
             let saved = fs::metadata(&file).unwrap().permissions().mode() & 0o7777;
             assert_eq!(saved, mode, "{saved:o} isn't {mode:o}");
@@ -405,8 +751,7 @@ mod tests {
     #[test]
     fn a_read_only_file_isnt_saved_over() {
         use std::os::unix::fs::PermissionsExt;
-        // SAFETY: geteuid has no preconditions.
-        if unsafe { libc::geteuid() } == 0 {
+        if is_root() {
             // Root may write any file.
             return;
         }
@@ -415,10 +760,64 @@ mod tests {
         fs::write(&file, "old").unwrap();
         fs::set_permissions(&file, fs::Permissions::from_mode(0o444)).unwrap();
 
-        let error = write_whole(&file, b"new").unwrap_err();
+        let error = folder.save(&file, b"new").unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert_eq!(fs::read_to_string(&file).unwrap(), "old");
         assert_eq!(folder.names(), ["notes.txt"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_write_only_file_is_saved_unless_it_must_be_copied_first() {
+        use std::os::unix::fs::PermissionsExt;
+        if is_root() {
+            // Root may read any file.
+            return;
+        }
+        let folder = Folder::new("write-only");
+        let file = folder.path("notes.txt");
+        let mode = |mode| fs::Permissions::from_mode(mode);
+        fs::write(&file, "old").unwrap();
+        fs::set_permissions(&file, mode(0o200)).unwrap();
+
+        folder.save(&file, b"new").unwrap();
+        let saved = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(saved, 0o200, "{saved:o}");
+        fs::set_permissions(&file, mode(0o600)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+
+        // A file with another name is written in place, after a copy of it
+        // is made, which a file that can't be read can't have.
+        fs::hard_link(&file, folder.path("other.txt")).unwrap();
+        fs::set_permissions(&file, mode(0o200)).unwrap();
+        let error = folder.save(&file, b"newer").unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        fs::set_permissions(&file, mode(0o600)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+        assert_eq!(folder.names(), ["notes.txt", "other.txt"]);
+        assert!(folder.backups_left().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_with_a_long_name_is_saved() {
+        // 245 bytes, under the 255 most file systems allow.
+        let name = format!("{}.txt", "n".repeat(241));
+        for linked in [false, true] {
+            let folder = Folder::new(if linked { "long-linked" } else { "long" });
+            let file = folder.path(&name);
+            fs::write(&file, "old").unwrap();
+            if linked {
+                fs::hard_link(&file, folder.path("other.txt")).unwrap();
+            }
+            folder.save(&file, b"new").unwrap();
+            assert_eq!(
+                fs::read_to_string(&file).unwrap(),
+                "new",
+                "linked: {linked}"
+            );
+            assert!(folder.backups_left().is_empty());
+        }
     }
 
     #[test]
@@ -429,7 +828,7 @@ mod tests {
         fs::write(&file, "old").unwrap();
         fs::hard_link(&file, &other).unwrap();
 
-        write_whole(&file, b"new").unwrap();
+        folder.save(&file, b"new").unwrap();
         assert_eq!(fs::read_to_string(&other).unwrap(), "new");
         #[cfg(unix)]
         {
@@ -438,6 +837,7 @@ mod tests {
             assert_eq!(inode(&file), inode(&other));
         }
         assert_eq!(folder.names(), ["notes.txt", "other.txt"]);
+        assert!(folder.backups_left().is_empty());
     }
 
     #[test]
@@ -459,10 +859,10 @@ mod tests {
             if linked {
                 fs::hard_link(&file, folder.path("other.txt")).unwrap();
             }
-            write_whole(&file, &big).unwrap();
+            folder.save(&file, &big).unwrap();
             assert!(fs::read(&file).unwrap() == big, "linked: {linked}");
             // And back to a small file, which ends where its text does.
-            write_whole(&file, b"small again").unwrap();
+            folder.save(&file, b"small again").unwrap();
             assert_eq!(fs::read(&file).unwrap(), b"small again");
             let expected: &[&str] = if linked {
                 &["big.txt", "other.txt"]
@@ -470,6 +870,366 @@ mod tests {
                 &["big.txt"]
             };
             assert_eq!(folder.names(), expected);
+            assert!(folder.backups_left().is_empty());
+        }
+    }
+
+    #[test]
+    fn a_save_holds_the_file_until_it_ends() {
+        for linked in [false, true] {
+            let folder = Folder::new(if linked { "held-linked" } else { "held" });
+            let file = folder.path("notes.txt");
+            fs::write(&file, "old").unwrap();
+            if linked {
+                fs::hard_link(&file, folder.path("other.txt")).unwrap();
+            }
+
+            let mut held = false;
+            folder
+                .save_with(&file, &mut |written| {
+                    held = is_held(&file);
+                    written.write_all(b"new")
+                })
+                .unwrap();
+            assert!(held, "linked: {linked}");
+            assert!(!is_held(&file), "linked: {linked}");
+
+            // A save that fails lets go of it too.
+            folder
+                .save_with(&file, &mut fail_halfway(b"newer"))
+                .unwrap_err();
+            assert!(!is_held(&file), "linked: {linked}");
+            assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+        }
+    }
+
+    #[test]
+    fn saves_at_once_each_leave_the_file_whole() {
+        const SAVES: usize = 40;
+        for linked in [false, true] {
+            let folder = Folder::new(if linked { "at-once-linked" } else { "at-once" });
+            let file = folder.path("notes.txt");
+            fs::write(&file, "old").unwrap();
+            if linked {
+                fs::hard_link(&file, folder.path("other.txt")).unwrap();
+            }
+            // Of different lengths, so that a mix of two shows.
+            let texts: Vec<Vec<u8>> = (0..4u8)
+                .map(|n| vec![b'a' + n; 3000 * (usize::from(n) + 1)])
+                .collect();
+
+            let (progress, made) = mpsc::channel();
+            for text in texts.clone() {
+                let (progress, file, backups, texts) = (
+                    progress.clone(),
+                    file.clone(),
+                    folder.backups(),
+                    texts.clone(),
+                );
+                thread::spawn(move || {
+                    for _ in 0..SAVES {
+                        let saved = write_whole_with(&file, &backups, &mut |written| {
+                            for piece in text.chunks(500) {
+                                written.write_all(piece)?;
+                                thread::yield_now();
+                            }
+                            Ok(())
+                        });
+                        // A reader that takes the lock finds one whole text.
+                        let read = saved.and_then(|()| {
+                            let mut reader = File::open(&file)?;
+                            reader.lock_shared()?;
+                            let mut read = Vec::new();
+                            reader.read_to_end(&mut read)?;
+                            Ok(read)
+                        });
+                        let whole = read
+                            .map(|read| texts.contains(&read))
+                            .map_err(|error| error.to_string());
+                        if progress.send(whole).is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+            drop(progress);
+            for _ in 0..texts.len() * SAVES {
+                let whole = made
+                    .recv_timeout(Duration::from_secs(30))
+                    .expect("the saves stopped making progress");
+                assert_eq!(whole, Ok(true), "linked: {linked}");
+            }
+            assert!(folder.backups_left().is_empty());
+        }
+    }
+
+    /// Saves `notes.txt` in a folder of its own, while `meanwhile`, given
+    /// the file's path, puts another file in its place partway through.
+    /// Returns the folder and what the save returned.
+    fn save_while(
+        name: &str,
+        linked: bool,
+        mut meanwhile: impl FnMut(&Path) -> io::Result<()>,
+    ) -> (Folder, io::Result<()>) {
+        let folder = Folder::new(&format!("{name}-{linked}"));
+        let file = folder.path("notes.txt");
+        fs::write(&file, "old").unwrap();
+        if linked {
+            fs::hard_link(&file, folder.path("other.txt")).unwrap();
+        }
+        let mut first = true;
+        let saved = folder.save_with(&file, &mut |written| {
+            if std::mem::take(&mut first) {
+                // Another program moves the file away first.
+                fs::rename(&file, folder.path("moved.txt"))?;
+                meanwhile(&file)?;
+            }
+            written.write_all(b"new")
+        });
+        (folder, saved)
+    }
+
+    #[test]
+    fn a_file_put_in_its_place_during_a_save_gets_the_text() {
+        for linked in [false, true] {
+            let (folder, saved) = save_while("replaced", linked, |file| {
+                fs::write(file, "another program's")
+            });
+            saved.unwrap();
+            let read = |name| fs::read_to_string(folder.path(name)).unwrap();
+            assert_eq!(read("notes.txt"), "new", "linked: {linked}");
+            assert_eq!(read("moved.txt"), "old", "linked: {linked}");
+            assert!(folder.backups_left().is_empty());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_file_put_in_its_place_during_a_save_is_left_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        if is_root() {
+            return;
+        }
+        for linked in [false, true] {
+            let (folder, saved) = save_while("replaced-read-only", linked, |file| {
+                fs::write(file, "another program's")?;
+                fs::set_permissions(file, fs::Permissions::from_mode(0o444))
+            });
+            assert_eq!(
+                saved.unwrap_err().kind(),
+                io::ErrorKind::PermissionDenied,
+                "linked: {linked}"
+            );
+            let file = folder.path("notes.txt");
+            assert_eq!(fs::read_to_string(&file).unwrap(), "another program's");
+            let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o444, "{mode:o}");
+            assert_eq!(fs::read_to_string(folder.path("moved.txt")).unwrap(), "old");
+            assert!(folder.backups_left().is_empty());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_put_in_its_place_during_a_save_is_followed() {
+        use std::os::unix::fs::symlink;
+        for linked in [false, true] {
+            let (folder, saved) = save_while("replaced-by-link", linked, |file| {
+                fs::write(file.with_file_name("elsewhere.txt"), "elsewhere")?;
+                symlink("elsewhere.txt", file)
+            });
+            saved.unwrap();
+            let file = folder.path("notes.txt");
+            assert!(fs::symlink_metadata(&file).unwrap().is_symlink());
+            let read = |name| fs::read_to_string(folder.path(name)).unwrap();
+            assert_eq!(read("elsewhere.txt"), "new", "linked: {linked}");
+            assert_eq!(read("moved.txt"), "old", "linked: {linked}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_pointed_elsewhere_during_a_save_has_its_new_target_written() {
+        use std::os::unix::fs::symlink;
+        for linked in [false, true] {
+            let folder = Folder::new(&format!("retargeted-{linked}"));
+            let link = folder.path("link.txt");
+            fs::write(folder.path("first.txt"), "first").unwrap();
+            fs::write(folder.path("second.txt"), "second").unwrap();
+            if linked {
+                fs::hard_link(folder.path("first.txt"), folder.path("other.txt")).unwrap();
+            }
+            symlink("first.txt", &link).unwrap();
+            let mut first = true;
+            folder
+                .save_with(&link, &mut |written| {
+                    if std::mem::take(&mut first) {
+                        symlink("second.txt", folder.path("new-link.txt"))?;
+                        fs::rename(folder.path("new-link.txt"), &link)?;
+                    }
+                    written.write_all(b"new")
+                })
+                .unwrap();
+            let read = |name| fs::read_to_string(folder.path(name)).unwrap();
+            assert_eq!(read("link.txt"), "new", "linked: {linked}");
+            assert_eq!(read("second.txt"), "new", "linked: {linked}");
+            assert_eq!(read("first.txt"), "first", "linked: {linked}");
+        }
+    }
+
+    #[test]
+    fn leftovers_of_an_earlier_save_dont_get_in_the_way() {
+        let folder = Folder::new("leftovers");
+        let file = folder.path("notes.txt");
+        fs::write(&file, "old").unwrap();
+        fs::hard_link(&file, folder.path("other.txt")).unwrap();
+        // What a save stopped by a crash leaves, by a jot that had this
+        // process id.
+        let pid = std::process::id();
+        let temporary = format!(".jot-save-{pid}-0.tmp");
+        let backup = format!("notes.txt-{pid}-0.backup");
+        fs::create_dir_all(folder.backups()).unwrap();
+        fs::write(folder.path(&temporary), "left behind").unwrap();
+        fs::write(folder.backups().join(&backup), "left behind").unwrap();
+
+        folder.save(&file, b"new").unwrap();
+        fs::remove_file(folder.path("other.txt")).unwrap();
+        folder.save(&file, b"newer").unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "newer");
+        assert_eq!(folder.names(), [temporary.clone(), "notes.txt".into()]);
+        assert_eq!(folder.backups_left(), std::slice::from_ref(&backup));
+        let read = |path: PathBuf| fs::read_to_string(path).unwrap();
+        assert_eq!(read(folder.path(&temporary)), "left behind");
+        assert_eq!(read(folder.backups().join(&backup)), "left behind");
+    }
+
+    #[cfg(target_os = "linux")]
+    mod linux {
+        use super::*;
+
+        const USER_OBJ: u16 = 0x01;
+        const USER: u16 = 0x02;
+        const GROUP_OBJ: u16 = 0x04;
+        const MASK: u16 = 0x10;
+        const OTHER: u16 = 0x20;
+        /// The id of an entry that names no one in particular.
+        const ANYONE: u32 = u32::MAX;
+        /// The user nobody.
+        const NOBODY: u32 = 65534;
+
+        /// A POSIX ACL as Linux keeps it in an extended attribute, from its
+        /// entries' tags, permissions and user or group ids.
+        fn acl(entries: &[(u16, u16, u32)]) -> Vec<u8> {
+            let mut acl = 2u32.to_le_bytes().to_vec();
+            for (tag, permissions, id) in entries {
+                acl.extend(tag.to_le_bytes());
+                acl.extend(permissions.to_le_bytes());
+                acl.extend(id.to_le_bytes());
+            }
+            acl
+        }
+
+        fn set_attribute(path: &Path, name: &str, value: &[u8]) -> io::Result<()> {
+            use std::os::unix::ffi::OsStrExt;
+            let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+            let name = std::ffi::CString::new(name).unwrap();
+            // SAFETY: both strings end with a nul, and `value` is as long as
+            // the length given with it.
+            let set = unsafe {
+                libc::setxattr(
+                    path.as_ptr(),
+                    name.as_ptr(),
+                    value.as_ptr().cast(),
+                    value.len(),
+                    0,
+                )
+            };
+            if set == 0 {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        }
+
+        fn attributes(path: &Path) -> Vec<(Vec<u8>, Vec<u8>)> {
+            extended_attributes(&File::open(path).unwrap()).unwrap()
+        }
+
+        fn inode(path: &Path) -> u64 {
+            use std::os::unix::fs::MetadataExt;
+            fs::metadata(path).unwrap().ino()
+        }
+
+        #[test]
+        fn a_save_keeps_the_files_acl_and_extended_attributes() {
+            let folder = Folder::new("attributes");
+            let file = folder.path("notes.txt");
+            fs::write(&file, "old").unwrap();
+            // Nobody may read it, whoever else may.
+            let denial = acl(&[
+                (USER_OBJ, 6, ANYONE),
+                (USER, 0, NOBODY),
+                (GROUP_OBJ, 4, ANYONE),
+                (MASK, 4, ANYONE),
+                (OTHER, 4, ANYONE),
+            ]);
+            if set_attribute(&file, "system.posix_acl_access", &denial)
+                .and_then(|()| set_attribute(&file, "user.jot-test", b"kept"))
+                .is_err()
+            {
+                eprintln!("Skipped, since the file system keeps no ACLs or extended attributes");
+                return;
+            }
+            let before = attributes(&file);
+            let names: Vec<&[u8]> = before.iter().map(|(name, _)| &name[..]).collect();
+            assert!(
+                names.contains(&&b"system.posix_acl_access"[..]),
+                "{before:?}"
+            );
+
+            folder.save(&file, b"new").unwrap();
+            assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+            assert_eq!(attributes(&file), before);
+            assert_eq!(folder.names(), ["notes.txt"]);
+            assert!(folder.backups_left().is_empty());
+        }
+
+        #[test]
+        fn a_save_takes_no_acl_from_the_folder() {
+            let folder = Folder::new("folder-acl");
+            let file = folder.path("notes.txt");
+            fs::write(&file, "old").unwrap();
+            let before = attributes(&file);
+            // New files in the folder would let nobody read and write them.
+            let inherited = acl(&[
+                (USER_OBJ, 7, ANYONE),
+                (USER, 6, NOBODY),
+                (GROUP_OBJ, 5, ANYONE),
+                (MASK, 7, ANYONE),
+                (OTHER, 5, ANYONE),
+            ]);
+            if set_attribute(&folder.files(), "system.posix_acl_default", &inherited).is_err() {
+                eprintln!("Skipped, since the file system keeps no ACLs");
+                return;
+            }
+
+            folder.save(&file, b"new").unwrap();
+            assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+            assert_eq!(attributes(&file), before);
+            assert_eq!(folder.names(), ["notes.txt"]);
+        }
+
+        #[test]
+        fn a_plain_file_is_replaced_by_a_new_one() {
+            let folder = Folder::new("replaced-whole");
+            let file = folder.path("notes.txt");
+            fs::write(&file, "old").unwrap();
+            let old = inode(&file);
+            folder.save(&file, b"new").unwrap();
+            assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+            assert_ne!(inode(&file), old);
+            assert_eq!(folder.names(), ["notes.txt"]);
+            assert!(folder.backups_left().is_empty());
         }
     }
 }

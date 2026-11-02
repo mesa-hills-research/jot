@@ -285,12 +285,14 @@ impl WindowState {
         content: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
-        file_write::write_whole(&path, content.as_bytes()).map_err(|error| {
-            format!(
-                "Couldn\u{2019}t save \u{201c}{}\u{201d}: {error}",
-                path.display()
-            )
-        })?;
+        file_write::write_whole(&path, content.as_bytes(), &super::backup_folder()).map_err(
+            |error| {
+                format!(
+                    "Couldn\u{2019}t save \u{201c}{}\u{201d}: {error}",
+                    path.display()
+                )
+            },
+        )?;
         #[cfg(target_os = "windows")]
         crate::windows_shell::file_used(&path, cx);
         doc.update(cx, |doc, cx| {

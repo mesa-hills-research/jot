@@ -127,13 +127,14 @@ impl Settings {
         Some(settings)
     }
 
-    /// Writes the settings to `path`, replacing the file whole.
-    pub fn save_to(&self, path: &Path) -> io::Result<()> {
+    /// Writes the settings to `path`, replacing the file whole. A copy of
+    /// a file written in place is kept in `backups` meanwhile.
+    pub fn save_to(&self, path: &Path, backups: &Path) -> io::Result<()> {
         let content = serde_json::to_string_pretty(self)?;
         if let Some(folder) = path.parent() {
             std::fs::create_dir_all(folder)?;
         }
-        file_write::write_whole(path, content.as_bytes())
+        file_write::write_whole(path, content.as_bytes(), backups)
     }
 
     pub fn zoom_in(&mut self) {
@@ -241,12 +242,16 @@ mod tests {
     fn every_setting_survives_a_save_and_a_fresh_load() {
         let folder = Folder::new("restart");
         let settings = changed_settings();
-        settings.save_to(&folder.file()).unwrap();
+        settings
+            .save_to(&folder.file(), &folder.0.join("backups"))
+            .unwrap();
         assert_eq!(Settings::load(&folder.file()).unwrap(), settings);
 
         // Saving again replaces the file, and leaves nothing beside it.
         let settings = Settings::default();
-        settings.save_to(&folder.file()).unwrap();
+        settings
+            .save_to(&folder.file(), &folder.0.join("backups"))
+            .unwrap();
         assert_eq!(Settings::load(&folder.file()).unwrap(), settings);
         let files: Vec<_> = std::fs::read_dir(folder.0.join("jot")).unwrap().collect();
         assert_eq!(files.len(), 1);
