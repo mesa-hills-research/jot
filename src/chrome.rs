@@ -2,6 +2,7 @@
 
 use crate::components::attempt_close_window;
 use crate::launch::jot_app;
+use crate::state::AppState;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
@@ -81,6 +82,13 @@ pub fn quit(cx: &mut App) {
                 return;
             }
         }
-        cx.quit();
+        // Quitting gives saves a moment at most, so the settings' latest
+        // write ends first. The windows' documents are saved by now.
+        let settings_saved = AppState::global(cx).read(cx).settings_saved();
+        cx.spawn(async move |cx| {
+            settings_saved.await;
+            cx.update(|cx| cx.quit());
+        })
+        .detach();
     });
 }

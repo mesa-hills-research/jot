@@ -1,8 +1,9 @@
-use super::{AppState, Document, EditorOptions, Settings};
+use super::{AppState, Document, EditorOptions, Save, Settings, on_own_thread};
 use crate::actions::*;
 use crate::components::View;
-use crate::file_write;
+use futures::FutureExt as _;
 use gpui_kit::component::input::{Keymap, Position};
+use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::{
     App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, Subscription, Window,
 };
@@ -59,6 +60,7 @@ pub struct WindowState {
     /// The settings the documents' editors have.
     applied: EditorSettings,
     _settings: Subscription,
+    _saves_on_quit: Subscription,
 }
 
 impl EventEmitter<WindowEvent> for WindowState {}
@@ -75,6 +77,16 @@ impl WindowState {
         let settings = cx.observe_in(&app_state, window, |this, _, window, cx| {
             this.apply_settings(window, cx);
         });
+        // Quit waits for the saves before it gets here. Logging off or
+        // shutting down may not, and then they get what time quitting gives.
+        let saves_on_quit = cx.on_app_quit(|this: &mut Self, cx| {
+            let saves = this.pending_saves(cx);
+            async move {
+                for save in saves {
+                    let _ = save.await;
+                }
+            }
+        });
         Self {
             app_state,
             documents: Vec::new(),
@@ -86,6 +98,7 @@ impl WindowState {
             quit_after_close: false,
             applied,
             _settings: settings,
+            _saves_on_quit: saves_on_quit,
         }
     }
 
@@ -166,6 +179,11 @@ impl WindowState {
         cx.emit(WindowEvent::TabAdded(self.active_index));
         cx.emit(WindowEvent::ActiveTabChanged(self.active_index));
         cx.notify();
+    }
+
+    /// The tab of `doc`, if it is still open.
+    pub fn index_of(&self, doc: &Entity<Document>) -> Option<usize> {
+        self.documents.iter().position(|open| open == doc)
     }
 
     /// The tab of the file at `path`, if it is open.
@@ -260,51 +278,85 @@ impl WindowState {
         self.add_document(document, cx);
     }
 
-    /// Saves the active document to its file. Returns `false` for a new
-    /// document, which has none yet, and the message to show when the save
-    /// fails.
-    pub fn save_active_document(&mut self, cx: &mut Context<Self>) -> Result<bool, String> {
+    /// Saves the active document to its file, or to the one the Save As
+    /// it's being saved by goes to. Returns `false` for a document without
+    /// one, which needs Save As.
+    pub fn save_active_document(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(doc) = self.active_document().cloned() else {
-            return Ok(false);
+            return false;
         };
-        let (path, content) = doc.update(cx, |doc, cx| (doc.path.clone(), doc.content(cx)));
-        let Some(path) = path else {
-            return Ok(false);
+        let Some(path) = doc.read(cx).save_path() else {
+            return false;
         };
-        self.save_document(doc, path, &content, cx)?;
-        Ok(true)
+        self.save_document(doc, path, window, cx);
+        true
     }
 
-    /// Writes `content` to `path`, replacing the file whole, and marks `doc`
-    /// saved there. Returns the message to show when the save fails, which
-    /// leaves the file as it was.
+    /// Saves `doc`'s text as it is now to `path`, replacing the file whole,
+    /// on a thread of its own and after the document's earlier saves. Once
+    /// the file has the text, the document is saved there, with unsaved
+    /// changes only if the text changed meanwhile. A save that fails says
+    /// why in the window and leaves the file as it was. The document's
+    /// [`Document::pending_save`] ends with the save.
     pub fn save_document(
         &mut self,
         doc: Entity<Document>,
         path: PathBuf,
-        content: &str,
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<(), String> {
-        file_write::write_whole(&path, content.as_bytes(), &super::backup_folder()).map_err(
-            |error| {
-                format!(
-                    "Couldn\u{2019}t save \u{201c}{}\u{201d}: {error}",
-                    path.display()
-                )
-            },
-        )?;
-        #[cfg(target_os = "windows")]
-        crate::windows_shell::file_used(&path, cx);
-        doc.update(cx, |doc, cx| {
-            doc.set_path(path);
-            doc.mark_saved(cx);
+    ) {
+        let text = doc.read(cx).text(cx);
+        let previous = doc.read(cx).pending_save();
+        let write = self.app_state.read(cx).file_writer.clone();
+        let state = cx.weak_entity();
+        let save = window.spawn(cx, {
+            let (doc, path) = (doc.clone(), path.clone());
+            async move |cx| {
+                if let Some(previous) = previous {
+                    let _ = previous.await;
+                }
+                let written = {
+                    let (path, text) = (path.clone(), text.clone());
+                    on_own_thread(move || write(&path, text.to_string().as_bytes())).await
+                };
+                let saved = written.map_err(|error| {
+                    format!(
+                        "Couldn\u{2019}t save \u{201c}{}\u{201d}. {error}",
+                        path.display()
+                    )
+                });
+                doc.update(cx, |doc, cx| doc.save_ended(&path, text, saved.is_ok(), cx));
+                let shown = cx.update(|window, cx| {
+                    #[cfg(target_os = "windows")]
+                    if saved.is_ok() {
+                        crate::windows_shell::file_used(&path, cx);
+                    }
+                    state.update(cx, |state, cx| state.save_ended(&saved, window, cx))
+                });
+                if !matches!(shown, Ok(Ok(())))
+                    && let Err(error) = &saved
+                {
+                    log::error!("{error}");
+                }
+                saved
+            }
         });
+        doc.update(cx, |doc, _| doc.save_started(path, save.shared()));
+    }
 
-        self.app_state.read(cx).save_vocabulary_in_background(cx);
-
+    /// Tells the window a save of one of its documents ended.
+    fn save_ended(
+        &mut self,
+        saved: &Result<(), String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match saved {
+            Ok(()) => self.app_state.read(cx).save_vocabulary_in_background(cx),
+            Err(error) => window.push_notification(Notification::error(error.clone()), cx),
+        }
         cx.emit(WindowEvent::DirtyStateChanged);
         cx.notify();
-        Ok(())
     }
 
     pub fn force_close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -362,6 +414,15 @@ impl WindowState {
 
     pub fn active_document(&self) -> Option<&Entity<Document>> {
         self.documents.get(self.active_index)
+    }
+
+    /// The saves of the window's documents that haven't ended, the last of
+    /// each document's.
+    pub fn pending_saves(&self, cx: &App) -> Vec<Save> {
+        self.documents
+            .iter()
+            .filter_map(|doc| doc.read(cx).pending_save())
+            .collect()
     }
 
     pub fn has_dirty_documents(&self, cx: &App) -> bool {
@@ -455,6 +516,6 @@ pub fn read_text(path: &Path) -> Result<String, String> {
         io::ErrorKind::InvalidData => {
             format!("{name} isn\u{2019}t a UTF-8 text file. Jot only opens UTF-8 text files.")
         }
-        _ => format!("Couldn\u{2019}t open {name}: {error}"),
+        _ => format!("Couldn\u{2019}t open {name}. {error}"),
     })
 }

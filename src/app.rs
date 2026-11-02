@@ -307,24 +307,14 @@ impl JotApp {
             .detach();
     }
 
+    /// Saves the active document to a file the user picks. The text saved
+    /// is the document's once they've picked it.
     fn trigger_save_as(window: &Window, window_state: Entity<WindowState>, cx: &App) {
+        let Some(doc) = window_state.read(cx).active_document().cloned() else {
+            return;
+        };
         window
             .spawn(cx, async move |cx| {
-                let (doc, content) = cx
-                    .update(|_, cx| {
-                        window_state.update(cx, |state, cx| {
-                            if let Some(doc) = state.active_document().cloned() {
-                                let content = doc.read(cx).content(cx);
-                                (Some(doc), content)
-                            } else {
-                                (None, String::new())
-                            }
-                        })
-                    })
-                    .unwrap_or((None, String::new()));
-
-                let Some(doc) = doc else { return };
-
                 let file = rfd::AsyncFileDialog::new()
                     .add_filter("Text Files", &["txt"])
                     .add_filter("All Files", &["*"])
@@ -335,11 +325,8 @@ impl JotApp {
                 if let Some(file) = file {
                     let path = file.path().to_path_buf();
                     cx.update(|window, cx| {
-                        let saved = window_state
-                            .update(cx, |state, cx| state.save_document(doc, path, &content, cx));
-                        if let Err(error) = saved {
-                            window.push_notification(Notification::error(error), cx);
-                        }
+                        window_state
+                            .update(cx, |state, cx| state.save_document(doc, path, window, cx));
                     })
                     .ok();
                 }
@@ -378,17 +365,9 @@ impl JotApp {
             }))
             .on_action(cx.listener(|this, _: &Save, window, cx| {
                 let window_state = this.window_state.clone();
-
-                let needs_save_as =
-                    window_state.update(cx, |state, cx| match state.save_active_document(cx) {
-                        Ok(saved) => !saved,
-                        Err(error) => {
-                            window.push_notification(Notification::error(error), cx);
-                            false
-                        }
-                    });
-
-                if needs_save_as {
+                let saving =
+                    window_state.update(cx, |state, cx| state.save_active_document(window, cx));
+                if !saving {
                     Self::trigger_save_as(window, window_state, cx);
                 }
             }))

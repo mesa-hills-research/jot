@@ -1,50 +1,64 @@
 use crate::chrome;
-use crate::state::WindowState;
+use crate::state::{Document, WindowState};
 use gpui_kit::component::{
     WindowExt,
     button::{Button, ButtonVariants},
     dialog::DialogFooter,
-    notification::Notification,
 };
 use gpui_kit::{App, Entity, ParentElement, Styled, Window, div};
 
+/// Closes the tab at `index`, as [`close_document`] does.
 pub fn close_tab_with_prompt(
     window_state: Entity<WindowState>,
     index: usize,
     window: &mut Window,
     cx: &mut App,
 ) {
-    window_state.update(cx, |state, cx| {
-        if let Some(doc) = state.documents.get(index) {
-            doc.update(cx, |doc, cx| {
-                doc.check_dirty(cx);
-            });
-        }
-    });
+    let doc = window_state.read(cx).documents.get(index).cloned();
+    if let Some(doc) = doc {
+        close_document(window_state, doc, window, cx);
+    }
+}
 
-    let is_dirty = window_state
-        .read(cx)
-        .documents
-        .get(index)
-        .map(|d| d.read(cx).dirty)
-        .unwrap_or(false);
-
-    if is_dirty {
-        window_state.update(cx, |state, cx| {
-            state.switch_to_tab(index, cx);
-        });
-        show_save_dialog_for_tab(window_state, index, window, cx);
+/// Closes `doc`'s tab, asking first about unsaved changes. Its saves end
+/// first, so that one in progress isn't taken for changes it would lose,
+/// and one that fails is asked about. A window that's closing goes on to
+/// its other documents once the tab has closed.
+pub fn close_document(
+    window_state: Entity<WindowState>,
+    doc: Entity<Document>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(save) = doc.read(cx).pending_save() {
+        window
+            .spawn(cx, async move |cx| {
+                let _ = save.await;
+                cx.update(|window, cx| close_document(window_state, doc, window, cx))
+                    .ok();
+            })
+            .detach();
+        return;
+    }
+    // Closed meanwhile, such as by another close that waited too.
+    let Some(index) = window_state.read(cx).index_of(&doc) else {
+        return;
+    };
+    doc.update(cx, |doc, cx| doc.check_dirty(cx));
+    if doc.read(cx).dirty {
+        window_state.update(cx, |state, cx| state.switch_to_tab(index, cx));
+        show_save_dialog(window_state, doc, window, cx);
     } else {
-        window_state.update(cx, |state, cx| {
-            state.force_close_tab(index, window, cx);
-        });
-        let is_closing = window_state.read(cx).is_closing_window;
-        if is_closing {
+        window_state.update(cx, |state, cx| state.force_close_tab(index, window, cx));
+        if window_state.read(cx).is_closing_window {
             prompt_next_dirty_tab(window_state, window, cx);
         }
     }
 }
 
+/// Whether the window can close now. When it can't, because a document has
+/// unsaved changes or is being saved, it goes on closing once its saves
+/// have ended and the user has answered about each change.
 pub fn attempt_close_window(
     window_state: Entity<WindowState>,
     window: &mut Window,
@@ -54,35 +68,61 @@ pub fn attempt_close_window(
         state.refresh_all_dirty_states(cx);
     });
 
-    let has_dirty = window_state.read(cx).has_dirty_documents(cx);
-
-    if has_dirty {
+    let state = window_state.read(cx);
+    if state.has_dirty_documents(cx) || has_pending_saves(state, cx) {
         window_state.update(cx, |state, _| {
             state.is_closing_window = true;
         });
         prompt_next_dirty_tab(window_state, window, cx);
         false
     } else {
-        window_state
-            .read(cx)
-            .app_state
-            .read(cx)
-            .save_vocabulary_on_close(cx);
+        state.app_state.read(cx).save_vocabulary_on_close(cx);
         true
     }
 }
 
+/// Whether a save the window waits for before it closes hasn't ended. It
+/// waits for its documents' saves, and for the settings' when it's the last
+/// window, which jot may quit with.
+fn has_pending_saves(state: &WindowState, cx: &App) -> bool {
+    !state.pending_saves(cx).is_empty()
+        || (cx.windows().len() <= 1 && state.app_state.read(cx).is_saving_settings())
+}
+
+/// Goes on closing the window. Once the saves it waits for have ended, it
+/// asks about the next document with unsaved changes, or closes the window
+/// when none has any.
 pub fn prompt_next_dirty_tab(window_state: Entity<WindowState>, window: &mut Window, cx: &mut App) {
-    let dirty_index = window_state.update(cx, |state, cx| {
+    let state = window_state.read(cx);
+    if has_pending_saves(state, cx) {
+        let saves = state.pending_saves(cx);
+        let settings_saved = state.app_state.read(cx).settings_saved();
+        let window_state = window_state.clone();
+        window
+            .spawn(cx, async move |cx| {
+                for save in saves {
+                    let _ = save.await;
+                }
+                settings_saved.await;
+                cx.update(|window, cx| prompt_next_dirty_tab(window_state, window, cx))
+                    .ok();
+            })
+            .detach();
+        return;
+    }
+
+    let dirty = window_state.update(cx, |state, cx| {
         state.refresh_all_dirty_states(cx);
-        state.documents.iter().position(|d| d.read(cx).dirty)
+        state.documents.iter().find(|d| d.read(cx).dirty).cloned()
     });
 
-    if let Some(index) = dirty_index {
-        window_state.update(cx, |state, cx| {
-            state.switch_to_tab(index, cx);
-        });
-        show_save_dialog_for_tab(window_state, index, window, cx);
+    if let Some(doc) = dirty {
+        if let Some(index) = window_state.read(cx).index_of(&doc) {
+            window_state.update(cx, |state, cx| {
+                state.switch_to_tab(index, cx);
+            });
+        }
+        show_save_dialog(window_state, doc, window, cx);
     } else {
         let state = window_state.read(cx);
         let (is_closing, quitting) = (state.is_closing_window, state.quit_after_close);
@@ -96,18 +136,18 @@ pub fn prompt_next_dirty_tab(window_state: Entity<WindowState>, window: &mut Win
     }
 }
 
-fn show_save_dialog_for_tab(
+/// Asks whether to save `doc`'s changes before its tab closes.
+fn show_save_dialog(
     window_state: Entity<WindowState>,
-    index: usize,
+    doc: Entity<Document>,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let title = window_state
-        .read(cx)
-        .documents
-        .get(index)
-        .map(|d| d.read(cx).title.clone())
-        .unwrap_or_else(|| "Untitled".into());
+    // One question at a time, such as when two closes waited for one save.
+    if window.has_active_dialog(cx) {
+        return;
+    }
+    let title = doc.read(cx).title.clone();
 
     window.open_dialog(cx, move |dialog, _window, _cx| {
         let window_state_cancel = window_state.clone();
@@ -132,6 +172,8 @@ fn show_save_dialog_for_tab(
                 let window_state_cancel_click = window_state.clone();
                 let window_state_discard_click = window_state.clone();
                 let window_state_save_click = window_state.clone();
+                let doc_discard_click = doc.clone();
+                let doc_save_click = doc.clone();
 
                 DialogFooter::new()
                     .child(Button::new("cancel").outline().label("Cancel").on_click(
@@ -148,27 +190,24 @@ fn show_save_dialog_for_tab(
                             .label("Don't Save")
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
-                                window_state_discard_click.update(cx, |state, cx| {
-                                    state.force_close_tab(index, window, cx);
-                                });
-                                let is_closing =
-                                    window_state_discard_click.read(cx).is_closing_window;
-                                if is_closing {
-                                    prompt_next_dirty_tab(
-                                        window_state_discard_click.clone(),
-                                        window,
-                                        cx,
-                                    );
+                                let state = &window_state_discard_click;
+                                if let Some(index) = state.read(cx).index_of(&doc_discard_click) {
+                                    state.update(cx, |state, cx| {
+                                        state.force_close_tab(index, window, cx);
+                                    });
+                                }
+                                if state.read(cx).is_closing_window {
+                                    prompt_next_dirty_tab(state.clone(), window, cx);
                                 }
                             }),
                     )
                     .child(Button::new("save").primary().label("Save").on_click(
                         move |_, window, cx| {
                             window.close_dialog(cx);
-                            perform_save_and_close_tab(
+                            save_and_close(
                                 window,
                                 window_state_save_click.clone(),
-                                index,
+                                doc_save_click.clone(),
                                 cx,
                             );
                         },
@@ -177,38 +216,19 @@ fn show_save_dialog_for_tab(
     });
 }
 
-fn perform_save_and_close_tab(
+/// Save, in the question about unsaved changes. Saves `doc`, by Save As
+/// when it has no file yet, and once the save has ended closes its tab, or
+/// asks again about changes typed meanwhile. A save that fails, or a Save
+/// As that's cancelled, stops the closing.
+pub(crate) fn save_and_close(
     window: &Window,
     window_state: Entity<WindowState>,
-    index: usize,
+    doc: Entity<Document>,
     cx: &App,
 ) {
     window
         .spawn(cx, async move |cx| {
-            let doc_info = cx
-                .update(|_, cx| {
-                    window_state.update(cx, |state, cx| {
-                        state.documents.get(index).cloned().map(|doc| {
-                            let content = doc.read(cx).content(cx);
-                            let path = doc.read(cx).path.clone();
-                            (doc, path, content)
-                        })
-                    })
-                })
-                .ok()
-                .flatten();
-
-            let Some((doc, path, content)) = doc_info else {
-                cx.update(|_window, cx| {
-                    window_state.update(cx, |state, _cx| {
-                        state.cancel_closing();
-                    });
-                })
-                .ok();
-                return;
-            };
-
-            let path = match path {
+            let path = match doc.read_with(cx, |doc, _| doc.save_path()) {
                 Some(path) => Some(path),
                 None => rfd::AsyncFileDialog::new()
                     .add_filter("Text Files", &["txt"])
@@ -218,41 +238,28 @@ fn perform_save_and_close_tab(
                     .await
                     .map(|file| file.path().to_path_buf()),
             };
-            // A save that fails says why, and the tab stays open.
-            let saved = path.is_some_and(|path| {
-                cx.update(|window, cx| {
-                    let saved = window_state
-                        .update(cx, |state, cx| state.save_document(doc, path, &content, cx));
-                    match saved {
-                        Ok(()) => true,
-                        Err(error) => {
-                            window.push_notification(Notification::error(error), cx);
-                            false
-                        }
-                    }
-                })
-                .unwrap_or(false)
-            });
-
-            if saved {
+            let save = path.and_then(|path| {
                 cx.update(|window, cx| {
                     window_state.update(cx, |state, cx| {
-                        state.force_close_tab(index, window, cx);
+                        state.save_document(doc.clone(), path, window, cx);
                     });
-                    let is_closing = window_state.read(cx).is_closing_window;
-                    if is_closing {
-                        prompt_next_dirty_tab(window_state.clone(), window, cx);
-                    }
+                    doc.read(cx).pending_save()
                 })
-                .ok();
-            } else {
-                cx.update(|_window, cx| {
-                    window_state.update(cx, |state, _cx| {
-                        state.cancel_closing();
-                    });
-                })
-                .ok();
-            }
+                .ok()
+                .flatten()
+            });
+            let saved = match save {
+                Some(save) => save.await.is_ok(),
+                None => false,
+            };
+            cx.update(|window, cx| {
+                if saved {
+                    close_document(window_state, doc, window, cx);
+                } else {
+                    window_state.update(cx, |state, _| state.cancel_closing());
+                }
+            })
+            .ok();
         })
         .detach();
 }

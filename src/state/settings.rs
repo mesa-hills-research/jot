@@ -1,4 +1,3 @@
-use crate::file_write;
 use crate::fonts::DEFAULT_EDITOR_FONT;
 use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::Keymap;
@@ -127,14 +126,9 @@ impl Settings {
         Some(settings)
     }
 
-    /// Writes the settings to `path`, replacing the file whole. A copy of
-    /// a file written in place is kept in `backups` meanwhile.
-    pub fn save_to(&self, path: &Path, backups: &Path) -> io::Result<()> {
-        let content = serde_json::to_string_pretty(self)?;
-        if let Some(folder) = path.parent() {
-            std::fs::create_dir_all(folder)?;
-        }
-        file_write::write_whole(path, content.as_bytes(), backups)
+    /// The settings as jot saves them.
+    pub fn to_json(&self) -> io::Result<String> {
+        Ok(serde_json::to_string_pretty(self)?)
     }
 
     pub fn zoom_in(&mut self) {
@@ -241,17 +235,23 @@ mod tests {
     #[test]
     fn every_setting_survives_a_save_and_a_fresh_load() {
         let folder = Folder::new("restart");
-        let settings = changed_settings();
-        settings
-            .save_to(&folder.file(), &folder.0.join("backups"))
+        let save = |settings: &Settings| {
+            std::fs::create_dir_all(folder.file().parent().unwrap()).unwrap();
+            let json = settings.to_json().unwrap();
+            crate::file_write::write_whole(
+                &folder.file(),
+                json.as_bytes(),
+                &folder.0.join("backups"),
+            )
             .unwrap();
+        };
+        let settings = changed_settings();
+        save(&settings);
         assert_eq!(Settings::load(&folder.file()).unwrap(), settings);
 
         // Saving again replaces the file, and leaves nothing beside it.
         let settings = Settings::default();
-        settings
-            .save_to(&folder.file(), &folder.0.join("backups"))
-            .unwrap();
+        save(&settings);
         assert_eq!(Settings::load(&folder.file()).unwrap(), settings);
         let files: Vec<_> = std::fs::read_dir(folder.0.join("jot")).unwrap().collect();
         assert_eq!(files.len(), 1);

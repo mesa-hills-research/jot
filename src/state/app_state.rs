@@ -1,19 +1,27 @@
 use super::Settings;
 use crate::fonts::{self, DEFAULT_EDITOR_FONT};
 use crate::theme;
+use futures::FutureExt as _;
+use futures::future::Shared;
 use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::Keymap;
 use gpui_kit::writing::{SuggestionMode, WordList, Writing, WritingOptions};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, Context, Entity, FontWeight, Global, SharedString, Task,
 };
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// How often the word suggestions' vocabulary is saved while something new
 /// has been learned, besides when a file is saved, a tab or a window closes,
 /// and jot quits.
 const VOCABULARY_SAVE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// How jot writes a file whole, given its path and its new contents. Tests
+/// put a slower or failing one in its place.
+pub type FileWriter = Arc<dyn Fn(&Path, &[u8]) -> io::Result<()> + Send + Sync>;
 
 /// What every window shares: the settings, the spelling dictionary, the word
 /// suggestions' vocabulary and pacing, and which window was used last.
@@ -28,9 +36,15 @@ pub struct AppState {
     /// The settings file, or `None` in tests and when the file couldn't be
     /// read, so that jot doesn't save over it.
     settings_file: Option<PathBuf>,
-    /// The latest save of the settings. The next one waits for it, so the
-    /// file ends up with the last change.
-    settings_save: Option<Task<()>>,
+    /// Writes the settings while they keep changing, one write at a time,
+    /// and ends once the file has the latest.
+    settings_save: Option<Shared<Task<()>>>,
+    /// Whether `settings_save` is running.
+    saving_settings: bool,
+    /// Whether the settings changed since `settings_save` last took them.
+    settings_unsaved: bool,
+    /// How files are written.
+    pub file_writer: FileWriter,
     /// A font the settings named that the text system lacks. The first
     /// window says so.
     missing_font: Option<SharedString>,
@@ -63,6 +77,12 @@ impl AppState {
         Self::create(settings, writing, None, cx)
     }
 
+    /// Saves the settings to `path` from now on, for tests.
+    #[cfg(test)]
+    pub fn set_settings_file(&mut self, path: PathBuf) {
+        self.settings_file = Some(path);
+    }
+
     fn create(
         settings: Settings,
         writing: Writing,
@@ -73,15 +93,11 @@ impl AppState {
         let state = cx.new(|cx: &mut Context<Self>| {
             // Learning is saved on the way out, at logoff or shutdown too, and
             // every few minutes in case jot doesn't get to quit. Quitting
-            // waits for the settings' latest save too.
+            // waits for the settings' latest save too, which Quit has done
+            // before it gets here.
             let save_on_quit = cx.on_app_quit(|this: &mut Self, _| {
                 this.writing.save();
-                let settings_save = this.settings_save.take();
-                async move {
-                    if let Some(save) = settings_save {
-                        save.await;
-                    }
-                }
+                this.settings_saved()
             });
             let vocabulary_saves = cx.spawn(async move |this, cx| {
                 loop {
@@ -99,6 +115,11 @@ impl AppState {
                 writing,
                 settings_file,
                 settings_save: None,
+                saving_settings: false,
+                settings_unsaved: false,
+                file_writer: Arc::new(|path, data| {
+                    crate::file_write::write_whole(path, data, &backup_folder())
+                }),
                 missing_font: None,
                 recent_windows: Vec::new(),
                 _save_on_quit: save_on_quit,
@@ -139,6 +160,21 @@ impl AppState {
         self.recent_windows.clone()
     }
 
+    /// Ends once the settings file has the latest settings.
+    pub fn settings_saved(&self) -> impl Future<Output = ()> + use<> {
+        let save = self.saving_settings.then(|| self.settings_save.clone());
+        async move {
+            if let Some(Some(save)) = save {
+                save.await;
+            }
+        }
+    }
+
+    /// Whether the settings are being written.
+    pub fn is_saving_settings(&self) -> bool {
+        self.saving_settings
+    }
+
     /// Saves the vocabulary without holding up the windows.
     pub fn save_vocabulary_in_background(&self, cx: &App) {
         self.writing.save_in_background(cx).detach();
@@ -151,25 +187,40 @@ impl AppState {
         self.save_vocabulary_in_background(cx);
     }
 
-    /// Saves the settings in the background and tells every window, which
-    /// applies them to its documents.
+    /// Saves the settings on a thread of their own and tells every window,
+    /// which applies them to its documents. Changes made while a write runs
+    /// are written together once it ends.
     fn settings_changed(&mut self, cx: &mut Context<Self>) {
-        if let Some(path) = self.settings_file.clone() {
-            let settings = self.settings.clone();
-            let previous = self.settings_save.take();
-            self.settings_save = Some(cx.background_spawn(async move {
-                if let Some(previous) = previous {
-                    previous.await;
-                }
-                if let Err(error) = settings.save_to(&path, &backup_folder()) {
-                    log::error!(
-                        "Couldn\u{2019}t save the settings to {}: {error}",
-                        path.display()
-                    );
-                }
-            }));
+        if self.settings_file.is_some() {
+            self.settings_unsaved = true;
+            if !self.saving_settings {
+                self.saving_settings = true;
+                let save = cx.spawn(async move |this, cx| {
+                    while let Ok(Some((settings, path, write))) =
+                        this.update(cx, |this, _| this.take_unsaved_settings())
+                    {
+                        let saved =
+                            on_own_thread(move || save_settings(&settings, &path, &write)).await;
+                        if let Err(error) = saved {
+                            log::error!("Couldn\u{2019}t save the settings: {error}");
+                        }
+                    }
+                });
+                self.settings_save = Some(save.shared());
+            }
         }
         cx.notify();
+    }
+
+    /// The settings to write next, with their file and the writer, or
+    /// `None`, which ends the writing, when the file has them.
+    fn take_unsaved_settings(&mut self) -> Option<(Settings, PathBuf, FileWriter)> {
+        let path = self.settings_file.clone()?;
+        if !std::mem::take(&mut self.settings_unsaved) {
+            self.saving_settings = false;
+            return None;
+        }
+        Some((self.settings.clone(), path, self.file_writer.clone()))
     }
 
     pub fn set_spell_check(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -258,6 +309,31 @@ impl AppState {
         self.settings.theme = name;
         self.settings_changed(cx);
     }
+}
+
+/// Runs `write` on a thread of its own, which may block for as long as it
+/// needs, such as on a slow disk or for another program's save of the same
+/// file, while the windows go on.
+pub async fn on_own_thread(
+    write: impl FnOnce() -> io::Result<()> + Send + 'static,
+) -> io::Result<()> {
+    let (sender, written) = futures::channel::oneshot::channel();
+    std::thread::Builder::new()
+        .name("jot-save".into())
+        .spawn(move || {
+            let _ = sender.send(write());
+        })?;
+    written
+        .await
+        .unwrap_or_else(|_| Err(io::Error::other("The save stopped partway")))
+}
+
+/// Writes `settings` to `path` with `write`, making the folder first.
+fn save_settings(settings: &Settings, path: &Path, write: &FileWriter) -> io::Result<()> {
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder)?;
+    }
+    write(path, settings.to_json()?.as_bytes())
 }
 
 /// Where jot keeps a copy of a file while it writes the file in place, to
@@ -354,11 +430,61 @@ mod tests {
             state.set_keymap(Keymap::Vim, cx);
             state.set_smooth_caret(true, cx);
         });
-        cx.run_until_parked();
+        cx.executor().allow_parking();
+        let saved = cx.read(|cx| state.read(cx).settings_saved());
+        cx.foreground_executor().block_test(saved);
 
         let settings = cx.read(|cx| state.read(cx).settings.clone());
         assert_eq!(settings.theme.as_deref(), Some("Gruvbox Dark"));
         assert_eq!(settings.zoom_level, 110);
+        assert_eq!(Settings::load(&file).unwrap(), settings);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    /// Settings changed several times at once are written once, with the
+    /// latest of them.
+    #[gpui_kit::test]
+    fn settings_changed_at_once_are_written_once(cx: &mut TestAppContext) {
+        use std::sync::Mutex;
+        let folder =
+            std::env::temp_dir().join(format!("jot-app-state-test-at-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let file = folder.join("jot").join("settings.json");
+        let state = cx.update(|cx| {
+            gpui_kit::init(cx);
+            theme::init(None, cx);
+            AppState::create(
+                Settings::default(),
+                Writing::in_memory(),
+                Some(file.clone()),
+                cx,
+            )
+        });
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let writer: FileWriter = {
+            let writes = writes.clone();
+            let backups = folder.join("backups");
+            Arc::new(move |path, data| {
+                writes
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(data).into_owned());
+                crate::file_write::write_whole(path, data, &backups)
+            })
+        };
+        state.update(cx, |state, _| state.file_writer = writer);
+        cx.executor().allow_parking();
+
+        state.update(cx, |state, cx| {
+            state.toggle_word_wrap(cx);
+            state.zoom_in(cx);
+            state.set_keymap(Keymap::Vim, cx);
+        });
+        let saved = cx.read(|cx| state.read(cx).settings_saved());
+        cx.foreground_executor().block_test(saved);
+
+        let settings = cx.read(|cx| state.read(cx).settings.clone());
+        assert_eq!(*writes.lock().unwrap(), [settings.to_json().unwrap()]);
         assert_eq!(Settings::load(&file).unwrap(), settings);
         std::fs::remove_dir_all(&folder).unwrap();
     }

@@ -30,6 +30,12 @@ chrono = "0.4"
 # Hands a later launch's files to the running jot's windows. GPUI depends on
 # it already.
 async-channel = "2"
+# Saves that others wait for: closing a document, quitting, and the next save
+# of the same document. GPUI depends on it already.
+futures = "0.3"
+# Tells at once that a document's text hasn't changed since it was last
+# compared with the file's. The version GPUI Kit's editor keeps its text in.
+ropey = { version = "=2.0.0-beta.1", default-features = false }
 
 # Single instance: the user's id, for the socket's folder. GPUI depends on it
 # already.
