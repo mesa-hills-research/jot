@@ -29,7 +29,10 @@ struct RecentFile {
 impl Default for RecentFile {
     fn default() -> Self {
         Self {
-            file: dirs::config_dir().map(|dir| dir.join("jot").join("recent.json")),
+            // Tests keep the user's list as it is.
+            file: dirs::config_dir()
+                .filter(|_| !cfg!(test))
+                .map(|dir| dir.join("jot").join("recent.json")),
             backups: backup_folder(),
         }
     }
