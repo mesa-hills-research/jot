@@ -59,36 +59,52 @@ pub fn close_window(window: &mut Window, cx: &mut App) {
 }
 
 /// Quits once every window agrees to close. A window with unsaved changes
-/// comes to the front and asks about them. Once it has closed, quitting goes
-/// on to the next window, and Cancel stops it.
+/// comes to the front and asks about them, and one with saves running waits
+/// for them. Cancel in a question stops quitting.
 pub fn quit(cx: &mut App) {
+    AppState::global(cx).update(cx, |state, _| state.quitting = true);
     // Deferred, so the window that sent Quit is free to answer too.
-    cx.defer(|cx| {
-        for handle in cx.windows() {
-            let agrees = handle
-                .update(cx, |_, window, cx| {
-                    if can_close(window, cx) {
-                        return true;
-                    }
-                    if let Some(app) = jot_app(window, cx) {
-                        let window_state = app.read(cx).window_state().clone();
-                        window_state.update(cx, |state, _| state.quit_after_close = true);
-                    }
+    cx.defer(quit_step);
+}
+
+/// A step of quitting, taken when Quit is chosen and again after each wait
+/// and answer, until it's cancelled. It looks at every window and save as
+/// they are now, and quits only when, in this same step, no window has
+/// changes to ask about or saves to wait for, and the settings are written.
+pub fn quit_step(cx: &mut App) {
+    let app_state = AppState::global(cx);
+    if !app_state.read(cx).quitting {
+        return;
+    }
+    for handle in cx.windows() {
+        // A window that can't close yet asks or waits, and once it has
+        // closed takes the next step.
+        let agrees = handle
+            .update(cx, |_, window, cx| {
+                let agrees = can_close(window, cx);
+                if !agrees {
                     window.activate_window();
-                    false
-                })
-                .unwrap_or(true);
-            if !agrees {
-                return;
-            }
+                }
+                agrees
+            })
+            .unwrap_or(true);
+        if !agrees {
+            return;
         }
-        // Quitting gives saves a moment at most, so the settings' latest
-        // write ends first. The windows' documents are saved by now.
-        let settings_saved = AppState::global(cx).read(cx).settings_saved();
+    }
+    if app_state.read(cx).is_saving_settings() {
+        let settings_saved = app_state.read(cx).settings_saved();
         cx.spawn(async move |cx| {
             settings_saved.await;
-            cx.update(|cx| cx.quit());
+            cx.update(quit_step);
         })
         .detach();
-    });
+        return;
+    }
+    for handle in cx.windows() {
+        handle
+            .update(cx, |_, window, _| window.remove_window())
+            .ok();
+    }
+    cx.quit();
 }

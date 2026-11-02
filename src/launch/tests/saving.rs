@@ -392,3 +392,78 @@ fn closing_the_last_window_waits_for_the_settings(cx: &mut TestAppContext) {
     let saved = crate::state::Settings::load(&settings_file).unwrap();
     assert!(saved.word_wrap);
 }
+
+/// Quit, with no changes to ask about, waits for the settings' write. Text
+/// typed while it waits is asked about, rather than lost.
+#[gpui_kit::test]
+fn quit_asks_about_changes_typed_while_it_waits(cx: &mut TestAppContext) {
+    let app_state = super::start(cx);
+    let files = Files::new("quit-typed-meanwhile", &["notes.txt"]);
+    app_state.update(cx, |state, _| {
+        state.set_settings_file(files.path("settings.json"))
+    });
+    let gate = Gate::install(&app_state, cx);
+    let first = open(vec![files.path("notes.txt")], cx);
+    let second = open(Vec::new(), cx);
+    app_state.update(cx, |state, cx| state.toggle_word_wrap(cx));
+    settle(cx);
+    gate.next_write();
+
+    cx.update(chrome::quit);
+    settle(cx);
+    assert_eq!(cx.windows().len(), 2);
+    type_text(first, "typed while quitting", cx);
+    let saved = cx.read(|cx| app_state.read(cx).settings_saved());
+    gate.let_go(Ok(()));
+    cx.foreground_executor().block_test(saved);
+    settle(cx);
+
+    assert!(cx.windows().contains(&first));
+    assert!(
+        has_dialog(first, cx),
+        "quitting didn't ask about the changes"
+    );
+    assert!(cx.windows().contains(&second));
+    assert_eq!(read(&files.path("notes.txt")), "notes.txt\n");
+}
+
+/// Quit closes every window once the settings' write and the saves started
+/// while it waited have ended, a window opened meanwhile too.
+#[gpui_kit::test]
+fn quit_waits_for_saves_started_while_it_waits(cx: &mut TestAppContext) {
+    let app_state = super::start(cx);
+    let files = Files::new("quit-saves-meanwhile", &["notes.txt"]);
+    app_state.update(cx, |state, _| {
+        state.set_settings_file(files.path("settings.json"))
+    });
+    let gate = Gate::install(&app_state, cx);
+    open(Vec::new(), cx);
+    open(Vec::new(), cx);
+    app_state.update(cx, |state, cx| state.toggle_word_wrap(cx));
+    settle(cx);
+    gate.next_write();
+
+    cx.update(chrome::quit);
+    settle(cx);
+    let opened = open(vec![files.path("notes.txt")], cx);
+    type_text(opened, "saved while quitting", cx);
+    cx.dispatch_action(opened, Save);
+    settle(cx);
+    let save = pending_save(opened, cx).expect("the save ended at once");
+
+    let saved = cx.read(|cx| app_state.read(cx).settings_saved());
+    gate.let_go(Ok(()));
+    cx.foreground_executor().block_test(saved);
+    settle(cx);
+    assert!(
+        cx.windows().contains(&opened),
+        "quit didn't wait for the save"
+    );
+    assert_eq!(gate.next_write().0, "saved while quitting");
+    gate.let_go(Ok(()));
+    assert_eq!(wait_for(save, cx), Ok(()));
+    settle(cx);
+
+    assert!(cx.windows().is_empty(), "{:?}", cx.windows());
+    assert_eq!(read(&files.path("notes.txt")), "saved while quitting");
+}

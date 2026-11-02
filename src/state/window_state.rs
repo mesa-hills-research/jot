@@ -55,8 +55,6 @@ pub struct WindowState {
     /// Whether the window is asking about unsaved changes on its way to
     /// closing.
     pub is_closing_window: bool,
-    /// Whether jot quits once this window has closed.
-    pub quit_after_close: bool,
     /// The settings the documents' editors have.
     applied: EditorSettings,
     _settings: Subscription,
@@ -95,7 +93,6 @@ impl WindowState {
             focus_handle: cx.focus_handle(),
             current_view: View::Editor,
             is_closing_window: false,
-            quit_after_close: false,
             applied,
             _settings: settings,
             _saves_on_quit: saves_on_quit,
@@ -154,9 +151,9 @@ impl WindowState {
     }
 
     /// Stops closing the window, and quitting, after the user cancelled.
-    pub fn cancel_closing(&mut self) {
+    pub fn cancel_closing(&mut self, cx: &mut App) {
         self.is_closing_window = false;
-        self.quit_after_close = false;
+        self.app_state.update(cx, |state, _| state.quitting = false);
     }
 
     pub fn new_untitled_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {

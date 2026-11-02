@@ -45,6 +45,9 @@ pub struct AppState {
     settings_unsaved: bool,
     /// How files are written.
     pub file_writer: FileWriter,
+    /// Whether Quit is under way. Cancel in a question about unsaved
+    /// changes stops it.
+    pub quitting: bool,
     /// A font the settings named that the text system lacks. The first
     /// window says so.
     missing_font: Option<SharedString>,
@@ -120,6 +123,7 @@ impl AppState {
                 file_writer: Arc::new(|path, data| {
                     crate::file_write::write_whole(path, data, &backup_folder())
                 }),
+                quitting: false,
                 missing_font: None,
                 recent_windows: Vec::new(),
                 _save_on_quit: save_on_quit,

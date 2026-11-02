@@ -51,7 +51,7 @@ pub fn close_document(
     } else {
         window_state.update(cx, |state, cx| state.force_close_tab(index, window, cx));
         if window_state.read(cx).is_closing_window {
-            prompt_next_dirty_tab(window_state, window, cx);
+            close_step(window_state, window, cx);
         }
     }
 }
@@ -73,7 +73,7 @@ pub fn attempt_close_window(
         window_state.update(cx, |state, _| {
             state.is_closing_window = true;
         });
-        prompt_next_dirty_tab(window_state, window, cx);
+        close_step(window_state, window, cx);
         false
     } else {
         state.app_state.read(cx).save_vocabulary_on_close(cx);
@@ -89,10 +89,12 @@ fn has_pending_saves(state: &WindowState, cx: &App) -> bool {
         || (cx.windows().len() <= 1 && state.app_state.read(cx).is_saving_settings())
 }
 
-/// Goes on closing the window. Once the saves it waits for have ended, it
-/// asks about the next document with unsaved changes, or closes the window
-/// when none has any.
-pub fn prompt_next_dirty_tab(window_state: Entity<WindowState>, window: &mut Window, cx: &mut App) {
+/// A step of closing the window, taken when closing starts and again after
+/// each wait and answer. It looks at the window as it is now. Once the
+/// saves it waits for have ended, it asks about the next document with
+/// unsaved changes, or closes the window when, in this same step, none has
+/// any. Quitting then goes on to the other windows.
+pub fn close_step(window_state: Entity<WindowState>, window: &mut Window, cx: &mut App) {
     let state = window_state.read(cx);
     if has_pending_saves(state, cx) {
         let saves = state.pending_saves(cx);
@@ -104,7 +106,7 @@ pub fn prompt_next_dirty_tab(window_state: Entity<WindowState>, window: &mut Win
                     let _ = save.await;
                 }
                 settings_saved.await;
-                cx.update(|window, cx| prompt_next_dirty_tab(window_state, window, cx))
+                cx.update(|window, cx| close_step(window_state, window, cx))
                     .ok();
             })
             .detach();
@@ -124,14 +126,9 @@ pub fn prompt_next_dirty_tab(window_state: Entity<WindowState>, window: &mut Win
         }
         show_save_dialog(window_state, doc, window, cx);
     } else {
-        let state = window_state.read(cx);
-        let (is_closing, quitting) = (state.is_closing_window, state.quit_after_close);
-        if is_closing {
+        if window_state.read(cx).is_closing_window {
             window.remove_window();
-            // Quitting goes on to the other windows.
-            if quitting {
-                chrome::quit(cx);
-            }
+            cx.defer(chrome::quit_step);
         }
     }
 }
@@ -158,8 +155,8 @@ fn show_save_dialog(
             .close_button(true)
             .keyboard(true)
             .on_cancel(move |_, _, cx| {
-                window_state_cancel.update(cx, |state, _| {
-                    state.cancel_closing();
+                window_state_cancel.update(cx, |state, cx| {
+                    state.cancel_closing(cx);
                 });
                 true
             })
@@ -178,8 +175,8 @@ fn show_save_dialog(
                 DialogFooter::new()
                     .child(Button::new("cancel").outline().label("Cancel").on_click(
                         move |_, window, cx| {
-                            window_state_cancel_click.update(cx, |state, _| {
-                                state.cancel_closing();
+                            window_state_cancel_click.update(cx, |state, cx| {
+                                state.cancel_closing(cx);
                             });
                             window.close_dialog(cx);
                         },
@@ -197,7 +194,7 @@ fn show_save_dialog(
                                     });
                                 }
                                 if state.read(cx).is_closing_window {
-                                    prompt_next_dirty_tab(state.clone(), window, cx);
+                                    close_step(state.clone(), window, cx);
                                 }
                             }),
                     )
@@ -256,7 +253,7 @@ pub(crate) fn save_and_close(
                 if saved {
                     close_document(window_state, doc, window, cx);
                 } else {
-                    window_state.update(cx, |state, _| state.cancel_closing());
+                    window_state.update(cx, |state, cx| state.cancel_closing(cx));
                 }
             })
             .ok();
