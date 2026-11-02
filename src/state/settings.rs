@@ -68,21 +68,25 @@ impl Settings {
         dirs::config_dir().map(|p| p.join("jot").join("settings.json"))
     }
 
-    /// The settings saved at `path`. A missing file gives the defaults. So
-    /// does a file that isn't settings, which is first moved aside to
-    /// `settings.damaged.json` to keep what it held. The error is a file
-    /// that couldn't be read or moved aside, which mustn't be saved over.
+    /// The settings saved at `path`. A missing or empty file gives the
+    /// defaults. So does a file that isn't settings, which is first moved
+    /// aside to keep what it held, to `settings.damaged.json` or, when that
+    /// holds an earlier one, `settings.damaged-2.json` and so on. The error
+    /// is a file that couldn't be read or moved aside, which mustn't be
+    /// saved over.
     pub fn load(path: &Path) -> io::Result<Self> {
         let content = match std::fs::read(path) {
             Ok(content) => content,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
             Err(error) => return Err(error),
         };
+        if content.is_empty() {
+            return Ok(Self::default());
+        }
         if let Some(settings) = std::str::from_utf8(&content).ok().and_then(Self::from_json) {
             return Ok(settings);
         }
-        let kept = path.with_extension("damaged.json");
-        std::fs::rename(path, &kept)?;
+        let kept = move_aside(path)?;
         log::warn!(
             "jot couldn\u{2019}t read its settings, so it starts with the defaults. The file is now {}.",
             kept.display()
@@ -158,6 +162,35 @@ impl Settings {
     }
 }
 
+/// Moves the damaged settings file at `path` to the first of
+/// `settings.damaged.json`, `settings.damaged-2.json` and so on that's free,
+/// and returns where it went.
+fn move_aside(path: &Path) -> io::Result<PathBuf> {
+    for n in 1..=1000 {
+        let kept = match n {
+            1 => path.with_extension("damaged.json"),
+            n => path.with_extension(format!("damaged-{n}.json")),
+        };
+        // A second name never takes the place of a file that has it.
+        match std::fs::hard_link(path, &kept) {
+            Ok(()) => {
+                std::fs::remove_file(path)?;
+                return Ok(kept);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            // A file system without hard links.
+            Err(_) if !kept.try_exists()? => {
+                std::fs::rename(path, &kept)?;
+                return Ok(kept);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::other(
+        "jot has kept a thousand damaged settings files already",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,17 +259,34 @@ mod tests {
     }
 
     #[test]
-    fn a_damaged_file_is_kept_aside_and_the_defaults_load() {
+    fn every_damaged_file_is_kept_aside_and_the_defaults_load() {
         let folder = Folder::new("damaged");
         let file = folder.file();
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        for damaged in [&b"{\"theme\": \"Gruv"[..], b"", b"[1, 2]", b"\xff\xfe"] {
-            std::fs::write(&file, damaged).unwrap();
+        let damaged = [&b"{\"theme\": \"Gruv"[..], b"[1, 2]", b"\xff\xfe"];
+        for (n, text) in damaged.iter().enumerate() {
+            std::fs::write(&file, text).unwrap();
             assert_eq!(Settings::load(&file).unwrap(), Settings::default());
             assert!(!file.exists());
-            let kept = file.with_file_name("settings.damaged.json");
-            assert_eq!(std::fs::read(kept).unwrap(), damaged);
+            // Each one is kept, and none takes the place of one kept before.
+            for (earlier, text) in damaged[..=n].iter().enumerate() {
+                let name = match earlier {
+                    0 => "settings.damaged.json".to_string(),
+                    _ => format!("settings.damaged-{}.json", earlier + 1),
+                };
+                assert_eq!(std::fs::read(file.with_file_name(name)).unwrap(), *text);
+            }
         }
+
+        // An empty file holds nothing to keep, and the copies stay as they are.
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(Settings::load(&file).unwrap(), Settings::default());
+        let names = std::fs::read_dir(file.parent().unwrap()).unwrap().count();
+        assert_eq!(names, damaged.len() + 1);
+        assert_eq!(
+            std::fs::read(file.with_file_name("settings.damaged.json")).unwrap(),
+            damaged[0]
+        );
     }
 
     #[test]
