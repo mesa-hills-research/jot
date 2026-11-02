@@ -4,7 +4,9 @@ use gpui_kit::component::input::Keymap;
 use gpui_kit::writing::SuggestionMode;
 use gpui_kit::{SharedString, px};
 use serde::{Deserialize, Serialize};
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub const ZOOM_LEVELS: &[u32] = &[50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300];
 
@@ -12,7 +14,7 @@ pub const ZOOM_LEVELS: &[u32] = &[50, 75, 90, 100, 110, 125, 150, 175, 200, 250,
 ///
 /// A field missing from the file takes its default, so files written before
 /// the field existed still load.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// The chosen color theme's name. Without one, the theme is light or
@@ -66,17 +68,48 @@ impl Settings {
         dirs::config_dir().map(|p| p.join("jot").join("settings.json"))
     }
 
-    pub fn load() -> Self {
-        Self::config_path()
-            .and_then(|path| std::fs::read_to_string(&path).ok())
-            .and_then(|content| Self::from_json(&content))
-            .unwrap_or_default()
+    /// The settings saved at `path`. A missing file gives the defaults. So
+    /// does a file that isn't settings, which is first moved aside to
+    /// `settings.damaged.json` to keep what it held. The error is a file
+    /// that couldn't be read or moved aside, which mustn't be saved over.
+    pub fn load(path: &Path) -> io::Result<Self> {
+        let content = match std::fs::read(path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(error) => return Err(error),
+        };
+        if let Some(settings) = std::str::from_utf8(&content).ok().and_then(Self::from_json) {
+            return Ok(settings);
+        }
+        let kept = path.with_extension("damaged.json");
+        std::fs::rename(path, &kept)?;
+        log::warn!(
+            "jot couldn\u{2019}t read its settings, so it starts with the defaults. The file is now {}.",
+            kept.display()
+        );
+        Ok(Self::default())
     }
 
-    /// Reads settings saved as JSON, by this version or an earlier one.
+    /// Reads settings saved as JSON, by this version or an earlier one. A
+    /// value it can't read, such as one edited by hand, keeps its default,
+    /// and the other settings load. `None` means the text isn't a JSON
+    /// object.
     fn from_json(content: &str) -> Option<Self> {
         let value: serde_json::Value = serde_json::from_str(content).ok()?;
-        let mut settings: Settings = serde_json::from_value(value.clone()).ok()?;
+        let fields = value.as_object()?;
+        let mut settings: Settings = serde_json::from_value(value.clone()).unwrap_or_else(|_| {
+            let mut readable = serde_json::Map::new();
+            for (key, field) in fields {
+                readable.insert(key.clone(), field.clone());
+                if serde_json::from_value::<Settings>(readable.clone().into()).is_err() {
+                    log::warn!(
+                        "jot couldn\u{2019}t read the setting {key}, so it has its default."
+                    );
+                    readable.remove(key);
+                }
+            }
+            serde_json::from_value(readable.into()).unwrap_or_default()
+        });
         if value.get("editor_font").is_none() {
             let mut font = settings.editor_font.clone();
             if let Some(family) = value.get("font_family").and_then(|family| family.as_str()) {
@@ -90,14 +123,10 @@ impl Settings {
         Some(settings)
     }
 
-    pub fn save_to(&self, path: &Path) {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-
-        if let Ok(content) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(path, content);
-        }
+    /// Writes the settings to `path`, replacing the file whole.
+    pub fn save_to(&self, path: &Path) -> io::Result<()> {
+        let content = serde_json::to_string_pretty(self)?;
+        write_whole(path, content.as_bytes())
     }
 
     pub fn zoom_in(&mut self) {
@@ -126,9 +155,156 @@ impl Settings {
     }
 }
 
+/// Writes `data` to `path` through a temporary file beside it, which then
+/// takes its place. The file holds the old data or the new, never part of
+/// either, even when jot or the computer stops halfway.
+fn write_whole(path: &Path, data: &[u8]) -> io::Result<()> {
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder)?;
+    }
+    let mut temporary = path.as_os_str().to_owned();
+    temporary.push(format!(".{}.tmp", std::process::id()));
+    let temporary = PathBuf::from(temporary);
+    let written = (|| {
+        let mut file = std::fs::File::create(&temporary)?;
+        file.write_all(data)?;
+        file.sync_all()?;
+        drop(file);
+        replace(&temporary, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    written
+}
+
+/// Renames `from` over `to`. On Windows another program, such as a virus
+/// scanner, may hold either file for a moment, so a refusal is tried again,
+/// for about 600 ms in all.
+fn replace(from: &Path, to: &Path) -> io::Result<()> {
+    const WAITS_MS: [u64; 6] = [10, 20, 40, 80, 160, 320];
+    let mut waits = WAITS_MS.iter();
+    loop {
+        match std::fs::rename(from, to) {
+            Err(error) if is_held_elsewhere(&error) => match waits.next() {
+                Some(&wait) => std::thread::sleep(Duration::from_millis(wait)),
+                None => return Err(error),
+            },
+            result => return result,
+        }
+    }
+}
+
+/// Whether Windows refused a rename because another program has the file
+/// open, which shows as access denied, a sharing violation or a lock
+/// violation.
+fn is_held_elsewhere(error: &io::Error) -> bool {
+    cfg!(windows) && matches!(error.raw_os_error(), Some(5 | 32 | 33))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder of its own for a test, removed afterwards.
+    struct Folder(PathBuf);
+
+    impl Folder {
+        fn new(name: &str) -> Self {
+            let folder = std::env::temp_dir()
+                .join(format!("jot-settings-test-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&folder);
+            Self(folder)
+        }
+
+        fn file(&self) -> PathBuf {
+            self.0.join("jot").join("settings.json")
+        }
+    }
+
+    impl Drop for Folder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Settings with every field changed from its default.
+    fn changed_settings() -> Settings {
+        Settings {
+            theme: Some("Gruvbox Dark".into()),
+            editor_font: FontSettings::new("Inconsolata")
+                .with_size(px(16.))
+                .with_line_height(1.7),
+            word_wrap: true,
+            line_numbers: false,
+            xml_auto_complete: true,
+            autocomplete: SuggestionMode::Eager,
+            spell_check: false,
+            tab_size: 2,
+            restore_session: true,
+            zoom_level: 150,
+            keymap: Keymap::Vim,
+            smooth_caret: true,
+        }
+    }
+
+    #[test]
+    fn every_setting_survives_a_save_and_a_fresh_load() {
+        let folder = Folder::new("restart");
+        let settings = changed_settings();
+        settings.save_to(&folder.file()).unwrap();
+        assert_eq!(Settings::load(&folder.file()).unwrap(), settings);
+
+        // Saving again replaces the file, and leaves nothing beside it.
+        let settings = Settings::default();
+        settings.save_to(&folder.file()).unwrap();
+        assert_eq!(Settings::load(&folder.file()).unwrap(), settings);
+        let files: Vec<_> = std::fs::read_dir(folder.0.join("jot")).unwrap().collect();
+        assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn a_missing_file_gives_the_defaults() {
+        let folder = Folder::new("missing");
+        assert_eq!(Settings::load(&folder.file()).unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn a_damaged_file_is_kept_aside_and_the_defaults_load() {
+        let folder = Folder::new("damaged");
+        let file = folder.file();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        for damaged in [&b"{\"theme\": \"Gruv"[..], b"", b"[1, 2]", b"\xff\xfe"] {
+            std::fs::write(&file, damaged).unwrap();
+            assert_eq!(Settings::load(&file).unwrap(), Settings::default());
+            assert!(!file.exists());
+            let kept = file.with_file_name("settings.damaged.json");
+            assert_eq!(std::fs::read(kept).unwrap(), damaged);
+        }
+    }
+
+    #[test]
+    fn a_value_that_cant_be_read_keeps_its_default_alone() {
+        let settings = Settings::from_json(
+            r#"{
+                "theme": "Ayu Dark",
+                "word_wrap": "yes",
+                "zoom_level": 150,
+                "keymap": "dvorak",
+                "smooth_caret": true
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            settings,
+            Settings {
+                theme: Some("Ayu Dark".into()),
+                zoom_level: 150,
+                smooth_caret: true,
+                ..Settings::default()
+            }
+        );
+    }
 
     #[test]
     fn settings_without_newer_fields_load_with_their_defaults() {

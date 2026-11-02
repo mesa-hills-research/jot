@@ -25,8 +25,12 @@ pub struct AppState {
     /// The spelling dictionary, the word suggestions' vocabulary, their
     /// mode, and how the user has been answering them this session.
     pub writing: Writing,
-    /// Where the settings are saved: the settings file, or nowhere in tests.
+    /// The settings file, or `None` in tests and when the file couldn't be
+    /// read, so that jot doesn't save over it.
     settings_file: Option<PathBuf>,
+    /// The latest save of the settings. The next one waits for it, so the
+    /// file ends up with the last change.
+    settings_save: Option<Task<()>>,
     /// A font the settings named that the text system lacks. The first
     /// window says so.
     missing_font: Option<SharedString>,
@@ -45,10 +49,10 @@ impl AppState {
     /// Loads the settings, and starts loading the dictionary and the
     /// vocabulary, for every window to share.
     pub fn init(cx: &mut App) -> Entity<AppState> {
-        let mut settings = Settings::load();
+        let (mut settings, settings_file) = load_settings();
         let missing_font = use_an_available_editor_font(&mut settings, cx);
         let writing = Writing::load(writing_options(), cx);
-        let state = Self::create(settings, writing, Settings::config_path(), cx);
+        let state = Self::create(settings, writing, settings_file, cx);
         state.update(cx, |state, _| state.missing_font = missing_font);
         state
     }
@@ -68,10 +72,16 @@ impl AppState {
         writing.set_suggestion_mode(settings.autocomplete);
         let state = cx.new(|cx: &mut Context<Self>| {
             // Learning is saved on the way out, at logoff or shutdown too, and
-            // every few minutes in case jot doesn't get to quit.
+            // every few minutes in case jot doesn't get to quit. Quitting
+            // waits for the settings' latest save too.
             let save_on_quit = cx.on_app_quit(|this: &mut Self, _| {
                 this.writing.save();
-                async {}
+                let settings_save = this.settings_save.take();
+                async move {
+                    if let Some(save) = settings_save {
+                        save.await;
+                    }
+                }
             });
             let vocabulary_saves = cx.spawn(async move |this, cx| {
                 loop {
@@ -88,6 +98,7 @@ impl AppState {
                 settings,
                 writing,
                 settings_file,
+                settings_save: None,
                 missing_font: None,
                 recent_windows: Vec::new(),
                 _save_on_quit: save_on_quit,
@@ -140,11 +151,23 @@ impl AppState {
         self.save_vocabulary_in_background(cx);
     }
 
-    /// Saves the settings and tells every window, which applies them to its
-    /// documents.
+    /// Saves the settings in the background and tells every window, which
+    /// applies them to its documents.
     fn settings_changed(&mut self, cx: &mut Context<Self>) {
-        if let Some(path) = &self.settings_file {
-            self.settings.save_to(path);
+        if let Some(path) = self.settings_file.clone() {
+            let settings = self.settings.clone();
+            let previous = self.settings_save.take();
+            self.settings_save = Some(cx.background_spawn(async move {
+                if let Some(previous) = previous {
+                    previous.await;
+                }
+                if let Err(error) = settings.save_to(&path) {
+                    log::error!(
+                        "Couldn\u{2019}t save the settings to {}: {error}",
+                        path.display()
+                    );
+                }
+            }));
         }
         cx.notify();
     }
@@ -237,6 +260,24 @@ impl AppState {
     }
 }
 
+/// The saved settings, and the file to save them to. A file that can't be
+/// read leaves jot with the defaults, which it doesn't save over the file.
+fn load_settings() -> (Settings, Option<PathBuf>) {
+    let Some(path) = Settings::config_path() else {
+        return (Settings::default(), None);
+    };
+    match Settings::load(&path) {
+        Ok(settings) => (settings, Some(path)),
+        Err(error) => {
+            log::error!(
+                "Couldn\u{2019}t read the settings in {}, so jot won\u{2019}t save them this time: {error}",
+                path.display()
+            );
+            (Settings::default(), None)
+        }
+    }
+}
+
 /// Switches the editor to the default font when the settings name one the
 /// text system doesn't have, such as a font file that was deleted. Returns
 /// the missing family.
@@ -267,4 +308,48 @@ fn writing_options() -> WritingOptions {
             WordList::File(folder.join("dictionary.txt")),
         ])
         .with_data_dir(folder)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::{TestAppContext, px};
+
+    /// A change made in jot is in the settings file for its next start.
+    #[gpui_kit::test]
+    fn changed_settings_load_at_the_next_start(cx: &mut TestAppContext) {
+        let folder =
+            std::env::temp_dir().join(format!("jot-app-state-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let file = folder.join("jot").join("settings.json");
+        let state = cx.update(|cx| {
+            gpui_kit::init(cx);
+            theme::init(None, cx);
+            AppState::create(
+                Settings::default(),
+                Writing::in_memory(),
+                Some(file.clone()),
+                cx,
+            )
+        });
+        state.update(cx, |state, cx| {
+            state.set_theme(Some("Gruvbox Dark".into()), cx);
+            state.set_editor_font(FontSettings::new("Inconsolata").with_size(px(16.)), cx);
+            state.toggle_word_wrap(cx);
+            state.toggle_line_numbers(cx);
+            state.set_xml_auto_complete(true, cx);
+            state.set_autocomplete(SuggestionMode::Eager, cx);
+            state.set_spell_check(false, cx);
+            state.zoom_in(cx);
+            state.set_keymap(Keymap::Vim, cx);
+            state.set_smooth_caret(true, cx);
+        });
+        cx.run_until_parked();
+
+        let settings = cx.read(|cx| state.read(cx).settings.clone());
+        assert_eq!(settings.theme.as_deref(), Some("Gruvbox Dark"));
+        assert_eq!(settings.zoom_level, 110);
+        assert_eq!(Settings::load(&file).unwrap(), settings);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
 }
