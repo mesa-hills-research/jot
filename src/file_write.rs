@@ -1,24 +1,47 @@
 //! Saving a file whole, so that a save that fails leaves the file as it was.
 //!
-//! A save locks the file from start to end, so that two saves of one file,
-//! from one program or two that lock it the same way, take turns. Before
-//! it changes anything, and again before the change takes effect, it checks
-//! that the path still leads to the file it locked. When a program put
-//! another file in its place meanwhile, the save puts back what it changed
-//! and starts again on that file.
+//! A new file, and on Linux an existing one, is written to a temporary file
+//! beside it, which then takes its name. An existing file is replaced only
+//! when the new one can have its owner, group, permissions and extended
+//! attributes, which hold its ACL and security label. Otherwise, and on
+//! Windows and macOS, the file is written in place, after a copy of it is
+//! made in a folder of the caller's, and the copy is put back if the write
+//! fails. A save through a symbolic link writes the file the link leads to.
 //!
-//! On Linux a file is saved by writing a temporary file beside it, which
-//! then takes its place, so the file holds the old contents or the new and
-//! never part of either. That's done only when the new file can have the
-//! old one's owner, group, permissions and extended attributes, which hold
-//! its ACL and security label, so that the same people may read and change
-//! it. Otherwise, and on other systems, the file is written in place, after
-//! a copy of it is made in a folder of the caller's. If the write fails
-//! partway, the copy is put back. If that fails too, the error says where
-//! the copy is.
+//! # What a save promises
 //!
-//! A save through a symbolic link writes the file the link points to and
-//! leaves the link.
+//! - The path, through its links, ends up with the new contents whole. Or
+//!   the save fails, and the file is as it was, with its contents, its
+//!   other names (hard links), owner, group, permissions and, on Linux,
+//!   extended attributes.
+//! - Saves of one file by programs that use this module, jot in other
+//!   processes included, take turns. Each locks the file from start to end,
+//!   so their writes never mix and none puts old contents back over
+//!   another's.
+//! - When another program moves, replaces or relinks the file during a
+//!   save, the save notices before its change takes effect, puts back what
+//!   it changed, and starts again on what the path leads to then. It checks
+//!   before writing, after writing and just before the new file takes the
+//!   name.
+//! - After a crash, a file replaced whole has its old contents or its new.
+//!   A file written in place may be cut short, with its old contents in the
+//!   caller's folder. A new file never shows part written under its name.
+//! - Cleanup removes only the temporary file and the copy the save made,
+//!   once it has checked that the name still belongs to them.
+//!
+//! # What it doesn't
+//!
+//! - A program that doesn't lock the file, as most editors and scripts
+//!   don't, can change it in the instant between the save's last check and
+//!   its change, and lose that change or have it undone. No call on these
+//!   systems compares and replaces in one step.
+//! - Changes another program made before the save started are overwritten
+//!   without a warning.
+//! - On NFS, Linux keeps these locks per process, so two saves in one
+//!   process don't wait for each other there, and other machines may not
+//!   honor them.
+//! - Extended attributes this user can't list, such as `trusted` ones, aren't
+//!   compared.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek as _, SeekFrom, Write as _};
@@ -49,10 +72,9 @@ fn write_whole_with(
         let (mut file, readable) = match open_to_write(&target) {
             Ok(opened) => opened,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                match write_new(&target, write) {
-                    // Another file took the name first.
-                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-                    written => return written,
+                match stage(path, &target, None, write)? {
+                    Staged::Committed => return Ok(()),
+                    _ => continue,
                 }
             }
             Err(error) => return Err(error),
@@ -126,28 +148,6 @@ fn open_to_write(target: &Path) -> io::Result<(File, bool)> {
     }
 }
 
-/// Makes the file `target` with what `write` writes. Fails with
-/// `AlreadyExists`, having changed nothing, when a file has that name.
-fn write_new(target: &Path, write: &mut dyn FnMut(&mut File) -> io::Result<()>) -> io::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(target)?;
-    // A save of the same new file from elsewhere waits for this one.
-    let written = file
-        .lock()
-        .and_then(|()| write(&mut file))
-        .and_then(|()| file.sync_all());
-    if let Err(error) = written {
-        // Removed while it's locked, so no other save writes it first.
-        remove_leftover(target);
-        return Err(error);
-    }
-    drop(file);
-    sync_folder(target);
-    Ok(())
-}
-
 /// Saves `file`, which `target` names and which this save has locked.
 /// Returns `false`, having put back anything it changed, when a program put
 /// another file in `target`'s place meanwhile.
@@ -160,8 +160,16 @@ fn save_locked(
     write: &mut dyn FnMut(&mut File) -> io::Result<()>,
 ) -> io::Result<bool> {
     #[cfg(target_os = "linux")]
-    if let Some(replaced) = replace(path, target, file, write)? {
-        return Ok(replaced);
+    {
+        use std::os::unix::fs::MetadataExt;
+        // The file's other names would keep the old contents.
+        if file.metadata()?.nlink() == 1 {
+            match stage(path, target, Some(file), write)? {
+                Staged::Committed => return Ok(true),
+                Staged::StartAgain => return Ok(false),
+                Staged::WriteInPlace => {}
+            }
+        }
     }
     if !readable {
         return Err(io::Error::new(
@@ -172,53 +180,168 @@ fn save_locked(
     write_in_place(path, target, file, backups, write)
 }
 
-/// Writes a temporary file beside `target` that takes the place of
-/// `original`, which `target` names, when the new file can have all that
-/// decides who may read or change it. Returns `None`, having changed
-/// nothing, when it can't, and `Some(false)`, having changed nothing, when a
-/// program put another file in `target`'s place meanwhile.
-#[cfg(target_os = "linux")]
-fn replace(
+/// How a staged save ended.
+enum Staged {
+    /// The file has the new contents.
+    Committed,
+    /// Nothing changed, and the save starts again on what the path leads to
+    /// now.
+    StartAgain,
+    /// Nothing changed. The file is to be written in place, since a new file
+    /// can't have all that decides who may read or change it.
+    #[cfg(target_os = "linux")]
+    WriteInPlace,
+}
+
+/// Writes the new contents to a temporary file beside `target`, which then
+/// takes its name. With an `original`, which `target` names and this save
+/// has locked, the new file takes its place. Without one, it takes a name
+/// nothing has, and the save starts again if something takes it first.
+fn stage(
     path: &Path,
     target: &Path,
-    original: &File,
+    original: Option<&File>,
     write: &mut dyn FnMut(&mut File) -> io::Result<()>,
-) -> io::Result<Option<bool>> {
-    use std::os::unix::fs::MetadataExt;
-    let metadata = original.metadata()?;
-    // The file's other names would keep the old contents.
-    if metadata.nlink() > 1 {
-        return Ok(None);
-    }
-    let (temporary_path, mut temporary) = create_unique(
+) -> io::Result<Staged> {
+    let (staged_path, mut staged) = create_unique(
         |n| target.with_file_name(format!(".jot-save-{}-{n}.tmp", std::process::id())),
         OpenOptions::new().write(true).create_new(true),
     )?;
-    let replaced = (|| {
-        if !take_owner(&temporary, &metadata) {
-            return Ok(None);
+    let committed = (|| {
+        #[cfg(target_os = "linux")]
+        if let Some(original) = original
+            && !can_match(original, &staged)?
+        {
+            return Ok(Staged::WriteInPlace);
         }
-        // After the owner, since changing the owner can clear the setuid
-        // and setgid bits.
-        temporary.set_permissions(metadata.permissions())?;
-        // After the permissions, which change an ACL's mask.
-        if !same_extended_attributes(original, &temporary) {
-            return Ok(None);
+        write(&mut staged)?;
+        staged.sync_all()?;
+        match original {
+            Some(original) => {
+                if !is_named_by(path, target, original)? {
+                    return Ok(Staged::StartAgain);
+                }
+                fs::rename(&staged_path, target)?;
+            }
+            None => {
+                // A link on the way may lead elsewhere by now.
+                if follow_links(path)? != target {
+                    return Ok(Staged::StartAgain);
+                }
+                match rename_to_new_name(&staged_path, target) {
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                        return Ok(Staged::StartAgain);
+                    }
+                    renamed => renamed?,
+                }
+            }
         }
-        write(&mut temporary)?;
-        temporary.sync_all()?;
-        if !is_named_by(path, target, original)? {
-            return Ok(Some(false));
-        }
-        fs::rename(&temporary_path, target)?;
         sync_folder(target);
-        Ok(Some(true))
+        // A program may have moved it, or pointed a link elsewhere, in the
+        // last instant. The file stays where it went.
+        if !is_named_by(path, target, &staged)? {
+            return Ok(Staged::StartAgain);
+        }
+        Ok(Staged::Committed)
     })();
-    drop(temporary);
-    if !matches!(replaced, Ok(Some(true))) {
-        remove_leftover(&temporary_path);
+    // Gone once it has taken the name, unless that was by a hard link.
+    remove_own(&staged_path, &staged);
+    committed
+}
+
+/// Gives `staged` the owner, group and permissions of `original`, and
+/// returns whether it then has all that decides who may read or change
+/// `original`.
+#[cfg(target_os = "linux")]
+fn can_match(original: &File, staged: &File) -> io::Result<bool> {
+    let metadata = original.metadata()?;
+    if !take_owner(staged, &metadata) {
+        return Ok(false);
     }
-    replaced
+    // After the owner, since changing the owner can clear the setuid and
+    // setgid bits.
+    staged.set_permissions(metadata.permissions())?;
+    // After the permissions, which change an ACL's mask.
+    Ok(same_extended_attributes(original, staged))
+}
+
+/// Renames `from` to `to`, failing with `AlreadyExists`, having changed
+/// nothing, when a file has that name.
+#[cfg(target_os = "linux")]
+fn rename_to_new_name(from: &Path, to: &Path) -> io::Result<()> {
+    let (from_name, to_name) = (c_path(from)?, c_path(to)?);
+    // SAFETY: both names end with a nul.
+    let renamed = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from_name.as_ptr(),
+            libc::AT_FDCWD,
+            to_name.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if renamed == 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    match error.raw_os_error() {
+        // A file system that can't rename without replacing.
+        Some(libc::EINVAL | libc::ENOSYS) => fs::hard_link(from, to),
+        _ => Err(error),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn rename_to_new_name(from: &Path, to: &Path) -> io::Result<()> {
+    let (from_name, to_name) = (c_path(from)?, c_path(to)?);
+    // SAFETY: both names end with a nul.
+    let renamed =
+        unsafe { libc::renamex_np(from_name.as_ptr(), to_name.as_ptr(), libc::RENAME_EXCL) };
+    if renamed == 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    match error.raw_os_error() {
+        // A file system that can't rename without replacing.
+        Some(libc::ENOTSUP) => fs::hard_link(from, to),
+        _ => Err(error),
+    }
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn rename_to_new_name(from: &Path, to: &Path) -> io::Result<()> {
+    fs::hard_link(from, to)
+}
+
+#[cfg(windows)]
+fn rename_to_new_name(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
+    use windows::core::PCWSTR;
+    let wide = |path: &Path| -> Vec<u16> {
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    };
+    let (from, to) = (wide(from), wide(to));
+    // SAFETY: both names end with a nul and outlive the call. Without
+    // MOVEFILE_REPLACE_EXISTING the move fails when `to` exists.
+    unsafe {
+        MoveFileExW(
+            PCWSTR(from.as_ptr()),
+            PCWSTR(to.as_ptr()),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    }?;
+    Ok(())
+}
+
+/// `path` as the C library takes it.
+#[cfg(unix)]
+fn c_path(path: &Path) -> io::Result<std::ffi::CString> {
+    use std::os::unix::ffi::OsStrExt as _;
+    Ok(std::ffi::CString::new(path.as_os_str().as_bytes())?)
 }
 
 /// Writes `file`, which `target` names, in place, after copying it into
@@ -241,23 +364,20 @@ fn write_in_place(
         Ok(())
     })();
     if let Err(error) = copied {
-        drop(backup);
-        remove_leftover(&backup_path);
+        remove_own(&backup_path, &backup);
         return Err(error);
     }
     let written = overwrite(file, write).and_then(|()| is_named_by(path, target, file));
     if let Ok(true) = written {
-        drop(backup);
-        remove_leftover(&backup_path);
+        remove_own(&backup_path, &backup);
         return Ok(true);
     }
     let restored = backup
         .seek(SeekFrom::Start(0))
         .and_then(|_| overwrite(file, &mut |file| io::copy(&mut backup, file).map(drop)));
-    drop(backup);
     match restored {
         Ok(()) => {
-            remove_leftover(&backup_path);
+            remove_own(&backup_path, &backup);
             written
         }
         Err(_) => {
@@ -331,13 +451,21 @@ fn create_unique(
     }
 }
 
-/// Removes a file this save made and no longer needs. One that stays is
-/// noted in the log. Its name says what made it.
-fn remove_leftover(path: &Path) {
-    if let Err(error) = fs::remove_file(path)
+/// Removes the name `path` of `file`, which this save made and no longer
+/// needs, if the name still belongs to it. One that stays is noted in the
+/// log, and its name says what made it.
+fn remove_own(path: &Path, file: &File) {
+    let removed = file_identity(file).and_then(|file| {
+        if path_identity(path, false)? == Some(file) {
+            fs::remove_file(path)
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(error) = removed
         && error.kind() != io::ErrorKind::NotFound
     {
-        log::warn!("Couldn\u{2019}t remove {}: {error}", path.display());
+        log::warn!("Couldn\u{2019}t remove {}. {error}", path.display());
     }
 }
 
@@ -1101,6 +1229,69 @@ mod tests {
         let read = |path: PathBuf| fs::read_to_string(path).unwrap();
         assert_eq!(read(folder.path(&temporary)), "left behind");
         assert_eq!(read(folder.backups().join(&backup)), "left behind");
+    }
+
+    #[test]
+    fn a_file_put_at_a_new_files_name_during_a_save_gets_the_text() {
+        let folder = Folder::new("new-replaced");
+        let file = folder.path("notes.txt");
+        let mut first = true;
+        folder
+            .save_with(&file, &mut |written| {
+                if std::mem::take(&mut first) {
+                    // Whatever has the name moves away, and another
+                    // program puts a file of its own there.
+                    if file.exists() {
+                        fs::rename(&file, folder.path("moved.txt"))?;
+                    }
+                    fs::write(&file, "another program's")?;
+                }
+                written.write_all(b"new")
+            })
+            .unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+        assert_eq!(folder.names(), ["notes.txt"]);
+    }
+
+    #[test]
+    fn a_failed_save_of_a_new_file_leaves_a_file_put_at_its_name() {
+        let folder = Folder::new("new-replaced-failed");
+        let file = folder.path("notes.txt");
+        let error = folder
+            .save_with(&file, &mut |written| {
+                written.write_all(b"part")?;
+                if file.exists() {
+                    fs::rename(&file, folder.path("moved.txt"))?;
+                }
+                fs::write(&file, "another program's")?;
+                Err(io::Error::other("The disk is full"))
+            })
+            .unwrap_err();
+        assert_eq!(error.to_string(), "The disk is full");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "another program's");
+        assert_eq!(folder.names(), ["notes.txt"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_a_new_file_pointed_elsewhere_during_a_save_has_its_new_target_written() {
+        use std::os::unix::fs::symlink;
+        let folder = Folder::new("new-retargeted");
+        let link = folder.path("link.txt");
+        symlink("first.txt", &link).unwrap();
+        fs::write(folder.path("second.txt"), "second").unwrap();
+        let mut first = true;
+        folder
+            .save_with(&link, &mut |written| {
+                if std::mem::take(&mut first) {
+                    symlink("second.txt", folder.path("new-link.txt"))?;
+                    fs::rename(folder.path("new-link.txt"), &link)?;
+                }
+                written.write_all(b"new")
+            })
+            .unwrap();
+        assert_eq!(fs::read_to_string(&link).unwrap(), "new");
+        assert_eq!(folder.names(), ["link.txt", "second.txt"]);
     }
 
     #[cfg(target_os = "linux")]
