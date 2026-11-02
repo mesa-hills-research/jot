@@ -418,8 +418,22 @@ fn rename_to_new_name(from: &Path, to: &Path) -> io::Result<()> {
             PCWSTR(to.as_ptr()),
             MOVEFILE_WRITE_THROUGH,
         )
-    }?;
-    Ok(())
+    }
+    .map_err(system_error)
+}
+
+/// `error` as the system error it is, so that its kind, such as
+/// `AlreadyExists`, shows. The windows crate keeps it as an HRESULT, which
+/// hides that.
+#[cfg(windows)]
+fn system_error(error: windows::core::Error) -> io::Error {
+    let code = error.code().0 as u32;
+    // An HRESULT that holds a Win32 error code.
+    if code & 0xFFFF_0000 == 0x8007_0000 {
+        io::Error::from_raw_os_error((code & 0xFFFF) as i32)
+    } else {
+        io::Error::other(error)
+    }
 }
 
 /// `path` as the C library takes it.
@@ -604,7 +618,8 @@ fn file_identity(file: &File) -> io::Result<Identity> {
     };
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: the handle is the open file's, and `info` outlives the call.
-    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }?;
+    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }
+        .map_err(system_error)?;
     let index = u64::from(info.nFileIndexHigh) << 32 | u64::from(info.nFileIndexLow);
     Ok((info.dwVolumeSerialNumber, index))
 }
