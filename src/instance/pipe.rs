@@ -281,12 +281,9 @@ impl fmt::Display for Sid {
             .iter()
             .fold(0u64, |value, &byte| (value << 8) | u64::from(byte));
         write!(f, "S-{revision}-{authority}")?;
-        for sub in bytes[8..].chunks_exact(4).take(usize::from(count)) {
-            write!(
-                f,
-                "-{}",
-                u32::from_le_bytes([sub[0], sub[1], sub[2], sub[3]])
-            )?;
+        let (subs, _) = bytes[8..].as_chunks::<4>();
+        for sub in subs.iter().take(usize::from(count)) {
+            write!(f, "-{}", u32::from_le_bytes(*sub))?;
         }
         Ok(())
     }
