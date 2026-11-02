@@ -18,11 +18,11 @@
 //!   processes included, take turns. Each locks the file from start to end,
 //!   so their writes never mix and none puts old contents back over
 //!   another's.
-//! - When another program moves, replaces or relinks the file during a
-//!   save, the save notices before its change takes effect, puts back what
-//!   it changed, and starts again on what the path leads to then. It checks
-//!   before writing, after writing and just before the new file takes the
-//!   name.
+//! - When another program moves, replaces, relinks or changes the file's
+//!   permissions during a save, the save notices before its change takes
+//!   effect, puts back what it changed, and starts again on what the path
+//!   leads to then. It checks before writing, after writing and just before
+//!   the new file takes the name.
 //! - After a crash, a file replaced whole has its old contents or its new.
 //!   A file written in place may be cut short, with its old contents in the
 //!   caller's folder. A new file never shows part written under its name.
@@ -47,8 +47,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
 
-/// How many times a save starts again on a file put in the place of the
-/// one it was saving.
+/// How many times a save starts again when another program changes the file
+/// or puts another in its place.
 const ATTEMPTS: usize = 8;
 
 /// Replaces the contents of the file at `path` with `data`, or makes the
@@ -102,7 +102,7 @@ fn write_whole_with(
         }
     }
     Err(io::Error::other(
-        "Another program kept putting other files in its place",
+        "Another program kept changing it or putting other files in its place",
     ))
 }
 
@@ -209,6 +209,8 @@ fn stage(
     )?;
     let committed = (|| {
         #[cfg(target_os = "linux")]
+        let before = original.map(access).transpose()?;
+        #[cfg(target_os = "linux")]
         if let Some(original) = original
             && !can_match(original, &staged)?
         {
@@ -218,6 +220,13 @@ fn stage(
         staged.sync_all()?;
         match original {
             Some(original) => {
+                // A program may have changed who may read or change it, or
+                // given it another name, during the write.
+                #[cfg(target_os = "linux")]
+                if Some(access(original)?) != before || !same_extended_attributes(original, &staged)
+                {
+                    return Ok(Staged::StartAgain);
+                }
                 if !is_named_by(path, target, original)? {
                     return Ok(Staged::StartAgain);
                 }
@@ -263,6 +272,35 @@ fn can_match(original: &File, staged: &File) -> io::Result<bool> {
     staged.set_permissions(metadata.permissions())?;
     // After the permissions, which change an ACL's mask.
     Ok(same_extended_attributes(original, staged))
+}
+
+/// What decides whether a new file may take a file's place, besides its
+/// extended attributes.
+#[cfg(target_os = "linux")]
+#[derive(PartialEq)]
+struct Access {
+    /// Which file it is.
+    identity: Identity,
+    names: u64,
+    mode: u32,
+    owner: (u32, u32),
+    /// When it last changed, which any change to the rest or to its
+    /// extended attributes moves. Comparing the rest as well doesn't depend
+    /// on how fine that time is.
+    changed: (i64, i64),
+}
+
+#[cfg(target_os = "linux")]
+fn access(file: &File) -> io::Result<Access> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    Ok(Access {
+        identity: (metadata.dev(), metadata.ino()),
+        names: metadata.nlink(),
+        mode: metadata.mode(),
+        owner: (metadata.uid(), metadata.gid()),
+        changed: (metadata.ctime(), metadata.ctime_nsec()),
+    })
 }
 
 /// Renames `from` to `to`, failing with `AlreadyExists`, having changed
@@ -1408,6 +1446,82 @@ mod tests {
             assert_eq!(fs::read_to_string(&file).unwrap(), "new");
             assert_eq!(attributes(&file), before);
             assert_eq!(folder.names(), ["notes.txt"]);
+        }
+
+        /// Saves `notes.txt`, plain and with mode 0644, while `meanwhile`
+        /// changes it partway through, once.
+        fn save_while_changed(
+            name: &str,
+            mut meanwhile: impl FnMut(&Path) -> io::Result<()>,
+        ) -> Folder {
+            use std::os::unix::fs::PermissionsExt;
+            let folder = Folder::new(name);
+            let file = folder.path("notes.txt");
+            fs::write(&file, "old").unwrap();
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+            let mut first = true;
+            folder
+                .save_with(&file, &mut |written| {
+                    if std::mem::take(&mut first) {
+                        meanwhile(&file)?;
+                    }
+                    written.write_all(b"new")
+                })
+                .unwrap();
+            assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+            folder
+        }
+
+        #[test]
+        fn permissions_narrowed_during_a_save_stay_narrowed() {
+            use std::os::unix::fs::PermissionsExt;
+            let folder = save_while_changed("narrowed", |file| {
+                fs::set_permissions(file, fs::Permissions::from_mode(0o600))
+            });
+            let mode = fs::metadata(folder.path("notes.txt"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+            assert_eq!(folder.names(), ["notes.txt"]);
+        }
+
+        #[test]
+        fn a_name_given_to_the_file_during_a_save_keeps_it() {
+            let folder = save_while_changed("linked-meanwhile", |file| {
+                fs::hard_link(file, file.with_file_name("other.txt"))
+            });
+            let read = |name| fs::read_to_string(folder.path(name)).unwrap();
+            assert_eq!(read("other.txt"), "new");
+            assert_eq!(
+                inode(&folder.path("other.txt")),
+                inode(&folder.path("notes.txt"))
+            );
+        }
+
+        #[test]
+        fn an_acl_given_to_the_file_during_a_save_is_kept() {
+            let denial = acl(&[
+                (USER_OBJ, 6, ANYONE),
+                (USER, 0, NOBODY),
+                (GROUP_OBJ, 4, ANYONE),
+                (MASK, 4, ANYONE),
+                (OTHER, 4, ANYONE),
+            ]);
+            let probe = Folder::new("acl-support");
+            fs::write(probe.path("probe"), "").unwrap();
+            if set_attribute(&probe.path("probe"), "system.posix_acl_access", &denial).is_err() {
+                eprintln!("Skipped, since the file system keeps no ACLs");
+                return;
+            }
+            let folder = save_while_changed("acl-meanwhile", |file| {
+                set_attribute(file, "system.posix_acl_access", &denial)
+            });
+            let names: Vec<Vec<u8>> = attributes(&folder.path("notes.txt"))
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            assert_eq!(names, [b"system.posix_acl_access".to_vec()]);
         }
 
         #[test]
