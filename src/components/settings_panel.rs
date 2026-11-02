@@ -1,5 +1,6 @@
 use crate::fonts;
 use crate::state::{AppState, WindowState, ZOOM_LEVELS};
+use crate::theme;
 use gpui_kit::component::{
     ActiveTheme, IconName, WindowExt,
     button::{Button, ButtonVariants, Toggle, ToggleGroup, ToggleVariants},
@@ -60,9 +61,7 @@ const SELECT_WIDTH: f32 = 240.;
 pub struct SettingsPanel {
     app_state: Entity<AppState>,
     window_state: Entity<WindowState>,
-    theme_select: Entity<SelectState<SearchableVec<SharedString>>>,
-    /// The theme names the theme menu lists.
-    theme_names: Vec<SharedString>,
+    theme_select: Entity<SelectState<SearchableVec<ThemeItem>>>,
     zoom_select: Entity<SelectState<Vec<ZoomItem>>>,
     font_picker: Entity<FontPickerState>,
     /// The font the font picker was last given from the settings.
@@ -78,15 +77,9 @@ impl SettingsPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let theme_names = Self::get_theme_names(cx);
-        let current_theme = app_state.read(cx).settings.theme.clone();
-
         let theme_select = cx.new(|cx| {
-            SelectState::new(SearchableVec::new(theme_names.clone()), None, window, cx)
+            SelectState::new(SearchableVec::new(ThemeItem::all(cx)), None, window, cx)
                 .searchable(true)
-        });
-        theme_select.update(cx, |state, cx| {
-            state.set_selected_value(&current_theme, window, cx);
         });
 
         let subscription = cx.subscribe(&theme_select, {
@@ -137,7 +130,6 @@ impl SettingsPanel {
             app_state,
             window_state,
             theme_select,
-            theme_names,
             zoom_select,
             font_picker,
             picker_font: editor_font,
@@ -184,41 +176,24 @@ impl SettingsPanel {
             .detach();
     }
 
-    fn get_theme_names(cx: &App) -> Vec<SharedString> {
-        let mut theme_names: Vec<SharedString> = gpui_kit::component::ThemeRegistry::global(cx)
-            .themes()
-            .keys()
-            .cloned()
-            .collect();
-        theme_names.sort();
-        theme_names
-    }
-
     /// Shows the current theme, zoom and font in their controls. They can
-    /// change elsewhere: themes load from files, the View menu zooms, and
-    /// other windows have settings pages too.
+    /// change elsewhere: the View menu zooms, and other windows have settings
+    /// pages too.
     fn sync_selects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let settings = &self.app_state.read(cx).settings;
-        let (theme, zoom, font) = (
-            settings.theme.clone(),
-            settings.zoom_level,
-            settings.editor_font.clone(),
-        );
+        // A theme jot no longer has shows as System, which stands in for it.
+        let theme = settings
+            .theme
+            .as_deref()
+            .and_then(|name| theme::offered(name, cx));
+        let (zoom, font) = (settings.zoom_level, settings.editor_font.clone());
         if font != self.picker_font {
             self.picker_font = font.clone();
             self.font_picker
                 .update(cx, |picker, cx| picker.set_settings(font, window, cx));
         }
-        let theme_names = Self::get_theme_names(cx);
-        let themes_changed = theme_names != self.theme_names;
-        if themes_changed {
-            self.theme_names = theme_names.clone();
-        }
         self.theme_select.update(cx, |state, cx| {
-            if themes_changed {
-                state.set_items(SearchableVec::new(theme_names), window, cx);
-            }
-            if themes_changed || state.selected_value() != Some(&theme) {
+            if state.selected_value() != Some(&theme) {
                 state.set_selected_value(&theme, window, cx);
             }
         });
@@ -399,7 +374,7 @@ impl Render for SettingsPanel {
             vec![
                 row(
                     "Theme",
-                    None,
+                    Some("System matches your computer\u{2019}s light or dark mode."),
                     Select::new(&self.theme_select)
                         .id("theme")
                         .search_placeholder("Search themes")
@@ -570,6 +545,42 @@ impl Render for SettingsPanel {
                         .mode(ScrollbarMode::Always),
                 ),
             )
+    }
+}
+
+/// A theme in the theme menu, or System, which follows the system between
+/// a light and a dark theme.
+#[derive(Clone, Debug)]
+struct ThemeItem {
+    name: Option<SharedString>,
+    title: SharedString,
+}
+
+impl ThemeItem {
+    /// System, then every theme.
+    fn all(cx: &App) -> Vec<Self> {
+        let system = Self {
+            name: None,
+            title: "System".into(),
+        };
+        std::iter::once(system)
+            .chain(theme::names(cx).into_iter().map(|name| Self {
+                title: name.clone(),
+                name: Some(name),
+            }))
+            .collect()
+    }
+}
+
+impl SelectItem for ThemeItem {
+    type Value = Option<SharedString>;
+
+    fn title(&self) -> SharedString {
+        self.title.clone()
+    }
+
+    fn value(&self) -> &Option<SharedString> {
+        &self.name
     }
 }
 

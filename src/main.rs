@@ -23,7 +23,6 @@ mod windows_shell;
 
 use args::Args;
 use assets::Assets;
-use gpui_kit::component::{Theme, ThemeRegistry};
 use gpui_kit::*;
 use instance::Startup;
 use launch::Launch;
@@ -89,7 +88,7 @@ fn main() {
         let app_state = AppState::init(cx);
         let settings = app_state.read(cx).settings.clone();
         actions::init(&settings, cx);
-        load_themes(cx, &settings.theme);
+        theme::init(settings.theme.as_deref(), cx);
 
         if launch::open_window(args.paths, cx).is_none() {
             panic!("jot couldn\u{2019}t open a window");
@@ -104,25 +103,4 @@ fn main() {
         })
         .detach();
     });
-}
-
-fn load_themes(cx: &mut App, initial_theme: &str) {
-    let initial_theme = initial_theme.to_string();
-
-    if let Some(theme_dir) = theme::find_themes_dir()
-        && let Err(e) = ThemeRegistry::watch_dir(theme_dir, cx, move |cx| {
-            let registry = ThemeRegistry::global(cx);
-            let theme_name = if registry.themes().contains_key(initial_theme.as_str()) {
-                initial_theme.as_str()
-            } else {
-                "Alduin"
-            };
-
-            if let Some(theme_config) = registry.themes().get(theme_name).cloned() {
-                Theme::update(cx, |theme| theme.apply_config(&theme_config));
-            }
-        })
-    {
-        log::error!("Failed to load themes: {}", e);
-    }
 }

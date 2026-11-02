@@ -1,8 +1,8 @@
 use super::Settings;
 use crate::fonts::{self, DEFAULT_EDITOR_FONT};
+use crate::theme;
 use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::Keymap;
-use gpui_kit::component::{Theme, ThemeRegistry};
 use gpui_kit::writing::{SuggestionMode, WordList, Writing, WritingOptions};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, Context, Entity, FontWeight, Global, SharedString, Task,
@@ -228,13 +228,10 @@ impl AppState {
         self.settings_changed(cx);
     }
 
-    /// Switches every window to the theme named `name`.
-    pub fn set_theme(&mut self, name: SharedString, cx: &mut Context<Self>) {
-        if let Some(theme_config) = ThemeRegistry::global(cx).themes().get(&name).cloned() {
-            // `update` also rebuilds the Base layer's copy of the theme,
-            // which draws the scrollbars.
-            Theme::update(cx, |theme| theme.apply_config(&theme_config));
-        }
+    /// Switches every window to the theme named `name`, or without one to
+    /// the light or dark theme the system calls for.
+    pub fn set_theme(&mut self, name: Option<SharedString>, cx: &mut Context<Self>) {
+        theme::apply(name.as_deref(), cx);
         self.settings.theme = name;
         self.settings_changed(cx);
     }

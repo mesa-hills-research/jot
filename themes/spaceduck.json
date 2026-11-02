@@ -2,13 +2,13 @@
   "name": "Spaceduck",
   "author": "Guillermo Rodriguez",
   "url": "https://github.com/pineapplegiant/spaceduck",
-  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "$schema": "https://github.com/longbridge/gpui-kit/raw/refs/heads/main/.theme-schema.json",
   "themes": [
     {
       "name": "Spaceduck",
       "mode": "dark",
       "colors": {
-        "accent.background": "#1c1d39",
+        "accent.background": "#212440",
         "accent.foreground": "#a3a49d",
         "background": "#0F111B",
         "border": "#272C42",
@@ -53,7 +53,6 @@
         "danger.foreground": "#0a0a00",
         "description_list.label.foreground": "#698399",
         "info.foreground": "#2a2c01",
-        "sidebar.accent.background": "#222440",
         "sidebar.primary.background": "#007494",
         "success.foreground": "#494c22",
         "switch.background": "#2a2c52",
@@ -67,6 +66,7 @@
         "editor.active_line.background": "#1c1d39",
         "editor.line_number": "#4b6479",
         "editor.active_line_number": "#ecf0c1",
+        "editor.invisible": "#4b647966",
         "conflict": "#e33400",
         "created": "#5ccc96",
         "deleted": "#e33400",

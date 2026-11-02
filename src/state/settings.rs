@@ -15,7 +15,9 @@ pub const ZOOM_LEVELS: &[u32] = &[50, 75, 90, 100, 110, 125, 150, 175, 200, 250,
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    pub theme: SharedString,
+    /// The chosen color theme's name. Without one, the theme is light or
+    /// dark as the system is.
+    pub theme: Option<SharedString>,
     /// The editor font: family, weight, style, size, line height and
     /// OpenType features. Files written before it existed name the family
     /// and size alone, in `font_family` and `font_size`.
@@ -40,7 +42,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            theme: "Alduin".into(),
+            theme: None,
             editor_font: FontSettings::new(DEFAULT_EDITOR_FONT)
                 .with_size(px(14.))
                 .with_line_height(1.5),
@@ -143,7 +145,7 @@ mod tests {
             "zoom_level": 100
         }"#;
         let settings = Settings::from_json(old).unwrap();
-        assert_eq!(settings.theme, "Gruvbox Dark");
+        assert_eq!(settings.theme.as_deref(), Some("Gruvbox Dark"));
         assert!(settings.spell_check);
         assert_eq!(settings.autocomplete, SuggestionMode::Quiet);
         assert_eq!(settings.keymap, Keymap::Cua);

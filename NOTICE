@@ -30,12 +30,12 @@ Icons (assets/icons/*.svg)
   assets/icons/LICENSE-LUCIDE. The other six are github.svg, resize-corner.svg
   and the four window-*.svg buttons.
 
-Color themes (themes/)
-  adventure, alduin, ayu, catppuccin, everforest, fahrenheit, flexoki, gruvbox,
-  harper, hybrid, jellybeans, kibble, macos-classic, matrix, mellifluous,
-  molokai, solarized, spaceduck, tokyonight and twilight
-  Based on the themes of GPUI Component 0.5.0, most of them with changed colors
-  Copyright 2024 - 2025 Longbridge
+Color themes (themes/*.json), built into the binary
+  GPUI Kit's set (https://github.com/mesa-hills-research/gpui_kit) and
+  matrix.json, all based on the themes of GPUI Component
+  (https://github.com/longbridge/gpui-component), most of them with changed
+  colors
+  Copyright 2024 - 2026 Longbridge
   Apache License 2.0, in LICENSE-APACHE
   Each file names the author of its color scheme and links to the source.
 

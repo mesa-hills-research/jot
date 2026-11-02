@@ -1,5 +1,5 @@
 {
-  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "$schema": "https://github.com/longbridge/gpui-kit/raw/refs/heads/main/.theme-schema.json",
   "name": "Everforest",
   "author": "sainnhe",
   "url": "https://github.com/sainnhe/everforest",
@@ -40,6 +40,7 @@
         "tab_bar.background": "#F4F1E2",
         "title_bar.background": "#F9F5E4",
         "title_bar.border": "#E7E5D4",
+        "status_bar.background": "#F9F5E4",
         "base.red": "#db7477",
         "base.green": "#839a5c",
         "base.yellow": "#ac8e52",
@@ -80,6 +81,7 @@
         "editor.active_line.background": "#EFEDDC",
         "editor.line_number": "#8e9396",
         "editor.active_line_number": "#5F6D75",
+        "editor.invisible": "#959a9d66",
         "conflict": "#e67e80",
         "created": "#a7c080",
         "deleted": "#e67e80",
@@ -200,7 +202,7 @@
         "scrollbar.thumb.background": "#485156",
         "secondary.background": "#2E383B",
         "secondary.foreground": "#849087",
-        "secondary.active.background": "#2c3538",
+        "secondary.active.background": "#303b3e",
         "secondary.hover.background": "#3E474B99",
         "tab.active.background": "#262E34",
         "tab.active.foreground": "#d3c6aa",
@@ -220,7 +222,7 @@
         "button.secondary.foreground": "#9CA99F",
         "chart.5": "#468078",
         "description_list.label.foreground": "#909C96",
-        "switch.background": "#3C4548",
+        "switch.background": "#3A4649",
         "table.head.foreground": "#95A19C"
       },
       "highlight": {
@@ -229,6 +231,7 @@
         "editor.active_line.background": "#3c4448",
         "editor.line_number": "#8F8F8F",
         "editor.active_line_number": "#DDDDDD",
+        "editor.invisible": "#959a9d66",
         "conflict": "#D2602D",
         "created": "#3f72e2",
         "hidden": "#9E9E9E",

@@ -1,5 +1,5 @@
 {
-  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "$schema": "https://github.com/longbridge/gpui-kit/raw/refs/heads/main/.theme-schema.json",
   "name": "Kibble",
   "author": "iTerm2-Color-Schemes",
   "url": "https://github.com/mbadolato/iTerm2-Color-Schemes",
@@ -8,7 +8,7 @@
       "name": "Kibble",
       "mode": "dark",
       "colors": {
-        "accent.background": "#22231f",
+        "accent.background": "#252525",
         "accent.foreground": "#f7f7f7",
         "background": "#0e100a",
         "border": "#292a24",
@@ -30,7 +30,7 @@
         "scrollbar.background": "#003a5b00",
         "scrollbar.thumb.background": "#726E69",
         "secondary.background": "#22231f",
-        "secondary.active.background": "#272824",
+        "secondary.active.background": "#292825",
         "secondary.foreground": "#f7f7f7",
         "secondary.hover.background": "#22231f",
         "success.background": "#6173e6",
@@ -59,8 +59,7 @@
         "chart.5": "#4259b2",
         "description_list.label.foreground": "#7e7e7e",
         "ring": "#3e57df",
-        "sidebar.accent.background": "#242521",
-        "switch.background": "#2e2f2b",
+        "switch.background": "#2f2e2a",
         "table.active.background": "#2bcf131f",
         "table.head.foreground": "#7b7b7b"
       },
@@ -70,6 +69,7 @@
         "editor.active_line.background": "#242223",
         "editor.line_number": "#726E69",
         "editor.active_line_number": "#f7f7f7",
+        "editor.invisible": "#726E6966",
         "conflict": "#c70031",
         "created": "#2BCF13",
         "deleted": "#c70031",

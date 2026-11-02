@@ -6,6 +6,7 @@ use crate::components::{
 use crate::fonts;
 use crate::launch::report_open_errors;
 use crate::state::{AppState, WindowState};
+use crate::theme;
 use gpui_kit::component::{
     ActiveTheme, WindowExt,
     button::{Button, ButtonVariants},
@@ -78,6 +79,13 @@ impl JotApp {
             }
         });
 
+        // Without a chosen theme, the theme follows the system between light
+        // and dark.
+        let appearance_subscription = cx.observe_window_appearance(window, |this, window, cx| {
+            let chosen = this.app_state.read(cx).settings.theme.clone();
+            theme::set_system_appearance(window.appearance(), chosen.as_deref(), cx);
+        });
+
         let errors = window_state.update(cx, |state, cx| {
             let errors = state.open_paths(paths, window, cx);
             if state.documents.is_empty() {
@@ -110,7 +118,11 @@ impl JotApp {
             settings_panel,
             goto_line_input,
             focus_handle,
-            _subscriptions: vec![settings_subscription, activation_subscription],
+            _subscriptions: vec![
+                settings_subscription,
+                activation_subscription,
+                appearance_subscription,
+            ],
         }
     }
 

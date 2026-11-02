@@ -1,5 +1,5 @@
 {
-  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "$schema": "https://github.com/longbridge/gpui-kit/raw/refs/heads/main/.theme-schema.json",
   "name": "macOS Classic",
   "author": "huacnlee",
   "url": "https://github.com/huacnlee/zed-theme-macos-classic",
@@ -14,14 +14,15 @@
         "background": "#F9F9F9",
         "foreground": "#000000",
         "border": "#D2D2D2",
+        "input.border": "#BCBCBC",
         "ring": "#0060de",
         "danger.foreground": "#FFFFFF",
         "list.active.background": "#0060de20",
         "list.active.border": "#0060de",
         "list.even.background": "#EFEFEF",
         "list.hover.background": "#E7E7E7",
-        "muted.background": "#F5F5F5",
-        "muted.foreground": "#6F6F6F",
+        "muted.background": "#EAEAEA",
+        "muted.foreground": "#696969",
         "popover.background": "#F5F5F5",
         "popover.foreground": "#000000",
         "primary.background": "#0060de",
@@ -36,8 +37,9 @@
         "tab.background": "#E9E9E9",
         "tab.foreground": "#606060",
         "tab_bar.background": "#E9E9E9",
-        "title_bar.background": "#FEFEFE",
+        "title_bar.background": "#F7F7F7",
         "title_bar.border": "#DADADA",
+        "status_bar.background": "#E9E9E9",
         "base.yellow": "#A98F00",
         "base.red": "#d21f07",
         "base.blue": "#0060de",
@@ -59,6 +61,7 @@
         "editor.active_line.background": "#F5F5F5",
         "editor.line_number": "#929292",
         "editor.active_line_number": "#000000",
+        "editor.invisible": "#007fff66",
         "conflict": "#d21f07",
         "created": "#0060de",
         "hidden": "#6D6D6D",
@@ -149,16 +152,18 @@
       "mode": "dark",
       "shadow": false,
       "colors": {
-        "accent.background": "#252426",
+        "accent.background": "#282629",
         "accent.foreground": "#CACCCA",
         "background": "#131313",
         "border": "#303030",
+        "input.border": "#4C4C4C",
         "ring": "#077CFD",
         "foreground": "#DEDEDE",
+        "danger.background": "#E44A4F",
         "list.even.background": "#232323",
         "list.active.background": "#1B6BE433",
         "list.active.border": "#077CFD",
-        "muted.background": "#252525",
+        "muted.background": "#202020",
         "muted.foreground": "#9D9D9D",
         "popover.background": "#101010",
         "popover.foreground": "#CACCCA",
@@ -176,7 +181,7 @@
         "tab_bar.background": "#1C1C1E",
         "tab.active.background": "#131313",
         "tab.foreground": "#8F8F8F",
-        "title_bar.background": "#1C1C1E",
+        "title_bar.background": "#171717",
         "selection.background": "#3F638B",
         "base.blue": "#419CFF",
         "base.cyan": "#07FDD3",
@@ -187,9 +192,9 @@
         "button.primary.background": "#006EE5",
         "button.primary.hover.background": "#006BDD",
         "chart.5": "#045EC3",
-        "danger.foreground": "#252A2F",
+        "danger.foreground": "#15191E",
         "info.foreground": "#5E6469",
-        "sidebar.accent.background": "#282729",
+        "sidebar.accent.background": "#29272A",
         "sidebar.primary.background": "#006EE5",
         "success.foreground": "#43494E",
         "table.active.background": "#1B6BE433",
@@ -201,12 +206,13 @@
         "editor.active_line.background": "#35343666",
         "editor.line_number": "#8F8F8F",
         "editor.active_line_number": "#DDDDDD",
+        "editor.invisible": "#007fff66",
         "conflict": "#D2602D",
         "created": "#3f72e2",
         "created.background": "#0C4619",
         "deleted.background": "#46190C",
         "error.background": "#46190C",
-        "error.border": "#802207",
+        "error.border": "#E44A4F",
         "hidden": "#9E9E9E",
         "hint": "#b283f8",
         "hint.background": "#250c4b",
@@ -221,34 +227,34 @@
         "warning.border": "#7B6508",
         "syntax": {
           "attribute": {
-            "color": "#e7cb8f"
+            "color": "#7FAEF9"
           },
           "boolean": {
-            "color": "#E1D797"
+            "color": "#CC9E00"
           },
           "comment": {
-            "color": "#9E9E9E"
+            "color": "#9D9D9D"
           },
           "comment.doc": {
-            "color": "#9E9E9E"
+            "color": "#9D9D9D"
           },
           "constant": {
-            "color": "#E1D797"
+            "color": "#CC9E00"
           },
           "constructor": {
-            "color": "#b5af9a"
+            "color": "#CBA6F7"
           },
           "embedded": {
             "color": "#CACCCA"
           },
           "function": {
-            "color": "#fdd888"
+            "color": "#B3C5F3"
           },
           "keyword": {
-            "color": "#c28b12"
+            "color": "#87B1F6"
           },
           "link_text": {
-            "color": "#3883FE",
+            "color": "#419CFF",
             "font_style": "normal"
           },
           "link_uri": {
@@ -256,41 +262,44 @@
             "font_style": "italic"
           },
           "number": {
-            "color": "#E1D797"
+            "color": "#CC9E00"
           },
           "string": {
-            "color": "#62BA46"
+            "color": "#A3E09F"
+          },
+          "text.code.span": {
+            "color": "#A3E09F"
           },
           "string.escape": {
-            "color": "#62BA46"
+            "color": "#68DC7C"
           },
           "string.regex": {
-            "color": "#62BA46"
+            "color": "#68DC7C"
           },
           "string.special": {
-            "color": "#E1D797"
+            "color": "#A3E09F"
           },
           "string.special.symbol": {
-            "color": "#E1D797"
+            "color": "#A3E09F"
           },
           "tag": {
-            "color": "#b5af9a"
+            "color": "#419CFF"
           },
           "text.literal": {
-            "color": "#E1D797"
+            "color": "#A3E09F"
           },
           "title": {
-            "color": "#fdd888",
+            "color": "#CC9E00",
             "font_weight": 600
           },
           "type": {
-            "color": "#d76637"
+            "color": "#CBA6F7"
           },
           "property": {
-            "color": "#CACCCA"
+            "color": "#BCC4E0"
           },
           "variable.special": {
-            "color": "#E19773"
+            "color": "#419CFF"
           }
         }
       }

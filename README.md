@@ -13,7 +13,7 @@ your files stay plain text, and jot helps you write them.
 - On Windows, a place in File Explorer's Open with menu for text files, added from Settings, and
   a taskbar jump list with New Window, New Document and your recent files
 - An optional smooth caret that glides as you type and move around
-- Light and dark color themes
+- 72 color themes from GPUI Kit, light or dark as your system is until you choose one
 - New from Template, which starts a new document from any file
 
 Words you add to the dictionary go to `user-dictionary.txt` in jot's settings folder:
@@ -40,9 +40,6 @@ git clone https://github.com/mesa-hills-research/jot
 cd jot
 cargo run --release
 ```
-
-jot loads its color themes from a `themes` folder in the working directory or next to the
-executable, so run it from the repository or copy `themes` beside the binary.
 
 ## License
 
