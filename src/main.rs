@@ -11,6 +11,7 @@ mod args;
 mod assets;
 mod chrome;
 mod components;
+mod file_write;
 mod fonts;
 mod instance;
 mod launch;

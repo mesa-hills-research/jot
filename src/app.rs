@@ -334,15 +334,12 @@ impl JotApp {
 
                 if let Some(file) = file {
                     let path = file.path().to_path_buf();
-                    if let Err(e) = std::fs::write(&path, &content) {
-                        log::error!("Failed to save file: {}", e);
-                        return;
-                    }
-
-                    cx.update(|_, cx| {
-                        window_state.update(cx, |state, cx| {
-                            state.document_saved(doc, path, cx);
-                        });
+                    cx.update(|window, cx| {
+                        let saved = window_state
+                            .update(cx, |state, cx| state.save_document(doc, path, &content, cx));
+                        if let Err(error) = saved {
+                            window.push_notification(Notification::error(error), cx);
+                        }
                     })
                     .ok();
                 }
@@ -385,8 +382,8 @@ impl JotApp {
                 let needs_save_as =
                     window_state.update(cx, |state, cx| match state.save_active_document(cx) {
                         Ok(saved) => !saved,
-                        Err(e) => {
-                            log::error!("Save failed: {}", e);
+                        Err(error) => {
+                            window.push_notification(Notification::error(error), cx);
                             false
                         }
                     });

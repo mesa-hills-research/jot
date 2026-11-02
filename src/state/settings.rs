@@ -1,12 +1,12 @@
+use crate::file_write;
 use crate::fonts::DEFAULT_EDITOR_FONT;
 use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::Keymap;
 use gpui_kit::writing::SuggestionMode;
 use gpui_kit::{SharedString, px};
 use serde::{Deserialize, Serialize};
-use std::io::{self, Write as _};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 pub const ZOOM_LEVELS: &[u32] = &[50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300];
 
@@ -126,7 +126,10 @@ impl Settings {
     /// Writes the settings to `path`, replacing the file whole.
     pub fn save_to(&self, path: &Path) -> io::Result<()> {
         let content = serde_json::to_string_pretty(self)?;
-        write_whole(path, content.as_bytes())
+        if let Some(folder) = path.parent() {
+            std::fs::create_dir_all(folder)?;
+        }
+        file_write::write_whole(path, content.as_bytes())
     }
 
     pub fn zoom_in(&mut self) {
@@ -153,53 +156,6 @@ impl Settings {
     pub fn effective_font_size(&self) -> f32 {
         f32::from(self.editor_font.size()) * (self.zoom_level as f32 / 100.0)
     }
-}
-
-/// Writes `data` to `path` through a temporary file beside it, which then
-/// takes its place. The file holds the old data or the new, never part of
-/// either, even when jot or the computer stops halfway.
-fn write_whole(path: &Path, data: &[u8]) -> io::Result<()> {
-    if let Some(folder) = path.parent() {
-        std::fs::create_dir_all(folder)?;
-    }
-    let mut temporary = path.as_os_str().to_owned();
-    temporary.push(format!(".{}.tmp", std::process::id()));
-    let temporary = PathBuf::from(temporary);
-    let written = (|| {
-        let mut file = std::fs::File::create(&temporary)?;
-        file.write_all(data)?;
-        file.sync_all()?;
-        drop(file);
-        replace(&temporary, path)
-    })();
-    if written.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    written
-}
-
-/// Renames `from` over `to`. On Windows another program, such as a virus
-/// scanner, may hold either file for a moment, so a refusal is tried again,
-/// for about 600 ms in all.
-fn replace(from: &Path, to: &Path) -> io::Result<()> {
-    const WAITS_MS: [u64; 6] = [10, 20, 40, 80, 160, 320];
-    let mut waits = WAITS_MS.iter();
-    loop {
-        match std::fs::rename(from, to) {
-            Err(error) if is_held_elsewhere(&error) => match waits.next() {
-                Some(&wait) => std::thread::sleep(Duration::from_millis(wait)),
-                None => return Err(error),
-            },
-            result => return result,
-        }
-    }
-}
-
-/// Whether Windows refused a rename because another program has the file
-/// open, which shows as access denied, a sharing violation or a lock
-/// violation.
-fn is_held_elsewhere(error: &io::Error) -> bool {
-    cfg!(windows) && matches!(error.raw_os_error(), Some(5 | 32 | 33))
 }
 
 #[cfg(test)]

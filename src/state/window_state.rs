@@ -1,6 +1,7 @@
 use super::{AppState, Document, EditorOptions, Settings};
 use crate::actions::*;
 use crate::components::View;
+use crate::file_write;
 use gpui_kit::component::input::{Keymap, Position};
 use gpui_kit::{
     App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, Subscription, Window,
@@ -259,44 +260,37 @@ impl WindowState {
         self.add_document(document, cx);
     }
 
-    pub fn save_active_document(&mut self, cx: &mut Context<Self>) -> anyhow::Result<bool> {
+    /// Saves the active document to its file. Returns `false` for a new
+    /// document, which has none yet, and the message to show when the save
+    /// fails.
+    pub fn save_active_document(&mut self, cx: &mut Context<Self>) -> Result<bool, String> {
         let Some(doc) = self.active_document().cloned() else {
             return Ok(false);
         };
-
         let (path, content) = doc.update(cx, |doc, cx| (doc.path.clone(), doc.content(cx)));
-
-        if let Some(file_path) = path {
-            self.perform_save(doc, file_path, content, cx)?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        let Some(path) = path else {
+            return Ok(false);
+        };
+        self.save_document(doc, path, &content, cx)?;
+        Ok(true)
     }
 
-    pub fn perform_save(
+    /// Writes `content` to `path`, replacing the file whole, and marks `doc`
+    /// saved there. Returns the message to show when the save fails, which
+    /// leaves the file as it was.
+    pub fn save_document(
         &mut self,
         doc: Entity<Document>,
         path: PathBuf,
-        content: String,
+        content: &str,
         cx: &mut Context<Self>,
-    ) -> anyhow::Result<()> {
-        std::fs::write(&path, &content)?;
-        #[cfg(target_os = "windows")]
-        crate::windows_shell::file_used(&path, cx);
-
-        doc.update(cx, |doc, cx| {
-            doc.mark_saved(cx);
-        });
-
-        self.app_state.read(cx).save_vocabulary_in_background(cx);
-
-        cx.emit(WindowEvent::DirtyStateChanged);
-        cx.notify();
-        Ok(())
-    }
-
-    pub fn document_saved(&mut self, doc: Entity<Document>, path: PathBuf, cx: &mut Context<Self>) {
+    ) -> Result<(), String> {
+        file_write::write_whole(&path, content.as_bytes()).map_err(|error| {
+            format!(
+                "Couldn\u{2019}t save \u{201c}{}\u{201d}: {error}",
+                path.display()
+            )
+        })?;
         #[cfg(target_os = "windows")]
         crate::windows_shell::file_used(&path, cx);
         doc.update(cx, |doc, cx| {
@@ -308,6 +302,7 @@ impl WindowState {
 
         cx.emit(WindowEvent::DirtyStateChanged);
         cx.notify();
+        Ok(())
     }
 
     pub fn force_close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {

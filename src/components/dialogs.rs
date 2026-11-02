@@ -4,6 +4,7 @@ use gpui_kit::component::{
     WindowExt,
     button::{Button, ButtonVariants},
     dialog::DialogFooter,
+    notification::Notification,
 };
 use gpui_kit::{App, Entity, ParentElement, Styled, Window, div};
 
@@ -207,52 +208,33 @@ fn perform_save_and_close_tab(
                 return;
             };
 
-            let saved_path = if let Some(existing_path) = path {
-                cx.update(|_, cx| {
-                    window_state.update(cx, |state, cx| {
-                        if let Err(e) = state.perform_save(
-                            doc.clone(),
-                            existing_path.clone(),
-                            content.clone(),
-                            cx,
-                        ) {
-                            log::error!("Failed to save: {}", e);
-                            None
-                        } else {
-                            Some(existing_path)
-                        }
-                    })
-                })
-                .ok()
-                .flatten()
-            } else {
-                let file = rfd::AsyncFileDialog::new()
+            let path = match path {
+                Some(path) => Some(path),
+                None => rfd::AsyncFileDialog::new()
                     .add_filter("Text Files", &["txt"])
                     .add_filter("All Files", &["*"])
                     .set_file_name("untitled.txt")
                     .save_file()
-                    .await;
-
-                if let Some(file) = file {
-                    let path = file.path().to_path_buf();
-                    if let Err(e) = std::fs::write(&path, &content) {
-                        log::error!("Failed to save file: {}", e);
-                        None
-                    } else {
-                        cx.update(|_, cx| {
-                            window_state.update(cx, |state, cx| {
-                                state.document_saved(doc.clone(), path.clone(), cx);
-                            });
-                        })
-                        .ok();
-                        Some(path)
-                    }
-                } else {
-                    None
-                }
+                    .await
+                    .map(|file| file.path().to_path_buf()),
             };
+            // A save that fails says why, and the tab stays open.
+            let saved = path.is_some_and(|path| {
+                cx.update(|window, cx| {
+                    let saved = window_state
+                        .update(cx, |state, cx| state.save_document(doc, path, &content, cx));
+                    match saved {
+                        Ok(()) => true,
+                        Err(error) => {
+                            window.push_notification(Notification::error(error), cx);
+                            false
+                        }
+                    }
+                })
+                .unwrap_or(false)
+            });
 
-            if saved_path.is_some() {
+            if saved {
                 cx.update(|window, cx| {
                     window_state.update(cx, |state, cx| {
                         state.force_close_tab(index, window, cx);

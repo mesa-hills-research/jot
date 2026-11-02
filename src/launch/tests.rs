@@ -309,3 +309,56 @@ fn text_fields_open_the_drawn_menu(cx: &mut TestAppContext) {
         )
     });
 }
+
+/// Save writes the file. A save that fails says why, keeps the changes
+/// unsaved and leaves the file as it was.
+#[cfg(unix)]
+#[gpui_kit::test]
+fn a_failed_save_says_why_and_keeps_the_changes(cx: &mut TestAppContext) {
+    use crate::actions::Save;
+    use gpui_kit::component::WindowExt as _;
+    use std::os::unix::fs::PermissionsExt;
+    // SAFETY: geteuid has no preconditions.
+    if unsafe { libc::geteuid() } == 0 {
+        // Root may write any file.
+        return;
+    }
+    start(cx);
+    let files = Files::new("failed-save", &["notes.txt"]);
+    let path = files.path("notes.txt");
+    let window = open(vec![path.clone()], cx);
+    let state = window_state(window, cx);
+    let type_and_save = |text: &'static str, cx: &mut TestAppContext| {
+        cx.update_window(window, |_, window, cx| {
+            let editor = state.read(cx).documents[0].read(cx).editor_state.clone();
+            editor.update(cx, |editor, cx| editor.set_value(text, window, cx));
+        })
+        .unwrap();
+        cx.dispatch_action(window, Save);
+        settle(cx);
+    };
+    let is_dirty = |cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            let document = state.read(cx).documents[0].clone();
+            document.update(cx, |document, cx| {
+                document.check_dirty(cx);
+                document.dirty
+            })
+        })
+    };
+    let notifications = |cx: &mut TestAppContext| {
+        cx.update_window(window, |_, window, cx| window.notifications(cx).len())
+            .unwrap()
+    };
+
+    type_and_save("saved", cx);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "saved");
+    assert!(!is_dirty(cx));
+    assert_eq!(notifications(cx), 0);
+
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+    type_and_save("not saved", cx);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "saved");
+    assert!(is_dirty(cx));
+    assert_eq!(notifications(cx), 1);
+}

@@ -102,7 +102,7 @@ fn edit_recent(change: impl FnOnce(&mut RecentFiles) -> bool) -> RecentFiles {
         let saved = path
             .parent()
             .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&path, recent.to_json()));
+            .and_then(|()| crate::file_write::write_whole(&path, recent.to_json().as_bytes()));
         if let Err(error) = saved {
             log::error!("Couldn\u{2019}t save the recent files: {error}");
         }
