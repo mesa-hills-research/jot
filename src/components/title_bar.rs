@@ -2,9 +2,10 @@
 
 use crate::chrome;
 use crate::key_log;
-use crate::state::WindowState;
+use crate::state::{AppState, WindowState};
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, TitleBar, h_flex, menu::AppMenuBar};
 use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::writing::QuietTiming;
 use gpui_kit::{
     App, Context, Div, Entity, InteractiveElement, IntoElement, ParentElement, Render, Styled,
     Window, div, px,
@@ -44,6 +45,8 @@ impl Render for JotTitleBar {
         } else {
             ("Jot".into(), false)
         };
+
+        let rhythm = AppState::global(cx).read(cx).writing.quiet_timing() == QuietTiming::Rhythm;
 
         let display_title = if is_dirty {
             format!("{} • - Jot", title_text)
@@ -85,19 +88,30 @@ impl Render for JotTitleBar {
                                 .child(display_title),
                         ),
                     )
-                    .child(div().min_w(px(100.)).flex().justify_end().when(
-                        key_log::is_recording(cx),
-                        |this| {
-                            this.child(
-                                div()
-                                    .debug_selector(|| "recording-keys".into())
-                                    .text_sm()
-                                    .whitespace_nowrap()
-                                    .text_color(cx.theme().danger)
-                                    .child("Recording keys"),
-                            )
-                        },
-                    )),
+                    .child(
+                        h_flex()
+                            .min_w(px(100.))
+                            .gap_3()
+                            .justify_end()
+                            .text_sm()
+                            .whitespace_nowrap()
+                            .when(rhythm, |this| {
+                                this.child(
+                                    div()
+                                        .debug_selector(|| "quiet-rhythm".into())
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("Rhythm"),
+                                )
+                            })
+                            .when(key_log::is_recording(cx), |this| {
+                                this.child(
+                                    div()
+                                        .debug_selector(|| "recording-keys".into())
+                                        .text_color(cx.theme().danger)
+                                        .child("Recording keys"),
+                                )
+                            }),
+                    ),
             )
     }
 }

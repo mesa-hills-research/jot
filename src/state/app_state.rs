@@ -5,7 +5,7 @@ use futures::FutureExt as _;
 use futures::future::Shared;
 use gpui_kit::component::font_picker::FontSettings;
 use gpui_kit::component::input::Keymap;
-use gpui_kit::writing::{SuggestionMode, WordList, Writing, WritingOptions};
+use gpui_kit::writing::{QuietTiming, SuggestionMode, WordList, Writing, WritingOptions};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, Context, Entity, FontWeight, Global, SharedString, Task,
 };
@@ -93,6 +93,10 @@ impl AppState {
         cx: &mut App,
     ) -> Entity<AppState> {
         writing.set_suggestion_mode(settings.autocomplete);
+        // A trial of Quiet timed by the typist's own gaps between keys.
+        if std::env::var_os("JOT_QUIET_RHYTHM").is_some_and(|value| value == "1") {
+            writing.set_quiet_timing(QuietTiming::Rhythm);
+        }
         let state = cx.new(|cx: &mut Context<Self>| {
             // Learning is saved on the way out, at logoff or shutdown too, and
             // every few minutes in case jot doesn't get to quit. Quitting

@@ -3667,7 +3667,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit"
 version = "0.7.15"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=jot-trial#4fd1864921c4bc205852ea1eb596437740d26984"
 dependencies = [
  "mhr-gpui",
  "mhr-gpui-kit-assets",
@@ -3681,7 +3681,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit-assets"
 version = "0.7.15"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=jot-trial#4fd1864921c4bc205852ea1eb596437740d26984"
 dependencies = [
  "anyhow",
  "gpui-pre-reqwest",
@@ -3695,7 +3695,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit-base"
 version = "0.7.15"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=jot-trial#4fd1864921c4bc205852ea1eb596437740d26984"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3737,7 +3737,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit-component"
 version = "0.7.15"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=jot-trial#4fd1864921c4bc205852ea1eb596437740d26984"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3783,7 +3783,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit-component-macros"
 version = "0.7.15"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=jot-trial#4fd1864921c4bc205852ea1eb596437740d26984"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3794,7 +3794,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit-writing"
 version = "0.7.15"
-source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=jot-trial#4fd1864921c4bc205852ea1eb596437740d26984"
 dependencies = [
  "anyhow",
  "log",

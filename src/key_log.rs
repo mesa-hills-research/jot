@@ -4,10 +4,12 @@
 //! Each document's editing goes to a file of its own in the `keylog` folder
 //! beside the settings (`%APPDATA%\jot\keylog` on Windows), one JSON Lines
 //! file per document from when it opens until it closes. GPUI Kit's
-//! `KeyLog` describes what a file holds. Nothing leaves this machine.
+//! `KeyLog` describes what a file holds. Its header also says how Quiet was
+//! timed, `fixed` or `rhythm` (with `JOT_QUIET_RHYTHM=1`). Nothing leaves
+//! this machine.
 
 use gpui_kit::component::input::{KeyLog, TextareaState};
-use gpui_kit::writing::Writing;
+use gpui_kit::writing::{QuietTiming, Writing};
 use gpui_kit::{App, Global};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -53,9 +55,17 @@ pub fn record(state: TextareaState, writing: &Writing, cx: &App) -> TextareaStat
         std::process::id(),
         DOCUMENTS.fetch_add(1, Ordering::Relaxed),
     );
+    let timing = match writing.quiet_timing() {
+        QuietTiming::FixedPause => "fixed",
+        QuietTiming::Rhythm => "rhythm",
+    };
     let writing = writing.clone();
     let mode = move || format!("{:?}", writing.suggestion_mode()).to_lowercase();
-    state.key_log(KeyLog::new(folder.join(name)).mode(mode))
+    state.key_log(
+        KeyLog::new(folder.join(name))
+            .mode(mode)
+            .header("timing", timing),
+    )
 }
 
 #[cfg(test)]
@@ -63,20 +73,24 @@ mod tests {
     use super::KeyLogFolder;
     use crate::launch::open_window;
     use crate::state::{AppState, Settings};
-    use gpui_kit::writing::Writing;
+    use gpui_kit::writing::{QuietTiming, Writing};
     use gpui_kit::{TestAppContext, VisualTestContext};
 
-    /// While recording, the title bar says so, and a document's typing goes
-    /// to a file of its own that starts with the text it had.
-    #[gpui_kit::test]
-    fn a_document_records_its_typing(cx: &mut TestAppContext) {
-        let folder = std::env::temp_dir().join(format!("jot-key-log-test-{}", std::process::id()));
+    /// Types into a new window while recording, with Quiet timed by
+    /// `timing`, and returns the recording's events, its header first.
+    fn record_typing(cx: &mut TestAppContext, timing: QuietTiming) -> Vec<serde_json::Value> {
+        let folder = std::env::temp_dir().join(format!(
+            "jot-key-log-test-{}-{timing:?}",
+            std::process::id()
+        ));
         _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).unwrap();
         cx.update(|cx| {
             gpui_kit::init(cx);
             let settings = Settings::default();
-            AppState::init_for_test(settings.clone(), Writing::in_memory(), cx);
+            let writing = Writing::in_memory();
+            writing.set_quiet_timing(timing);
+            AppState::init_for_test(settings.clone(), writing, cx);
             crate::actions::init(&settings, cx);
             cx.set_global(KeyLogFolder(folder.clone()));
         });
@@ -85,6 +99,10 @@ mod tests {
         cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("recording-keys").is_some());
+        assert_eq!(
+            cx.debug_bounds("quiet-rhythm").is_some(),
+            timing == QuietTiming::Rhythm
+        );
 
         cx.simulate_input("Hi there");
         let files: Vec<_> = std::fs::read_dir(&folder)
@@ -94,17 +112,33 @@ mod tests {
         assert_eq!(files.len(), 1);
         let log = std::fs::read_to_string(&files[0]).unwrap();
         _ = std::fs::remove_dir_all(&folder);
-        let events: Vec<serde_json::Value> = log
-            .lines()
+        log.lines()
             .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
+            .collect()
+    }
+
+    /// While recording, the title bar says so, and a document's typing goes
+    /// to a file of its own that starts with the text it had, the mode and
+    /// how Quiet was timed.
+    #[gpui_kit::test]
+    fn a_document_records_its_typing(cx: &mut TestAppContext) {
+        let events = record_typing(cx, QuietTiming::FixedPause);
         assert_eq!(events[0]["text"], "");
         assert_eq!(events[0]["mode"], "quiet");
+        assert_eq!(events[0]["timing"], "fixed");
         let typed: String = events
             .iter()
             .filter(|event| event["k"] == "type")
             .map(|event| event["s"].as_str().unwrap())
             .collect();
         assert_eq!(typed, "Hi there");
+    }
+
+    /// With Quiet timed by the typist's rhythm, the title bar says Rhythm
+    /// and the recording says so too.
+    #[gpui_kit::test]
+    fn a_recording_names_rhythm_timing(cx: &mut TestAppContext) {
+        let events = record_typing(cx, QuietTiming::Rhythm);
+        assert_eq!(events[0]["timing"], "rhythm");
     }
 }
