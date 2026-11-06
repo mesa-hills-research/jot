@@ -1,6 +1,7 @@
 //! Title bar containing the menus and the window controls.
 
 use crate::chrome;
+use crate::key_log;
 use crate::state::WindowState;
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, TitleBar, h_flex, menu::AppMenuBar};
 use gpui_kit::prelude::FluentBuilder;
@@ -84,7 +85,19 @@ impl Render for JotTitleBar {
                                 .child(display_title),
                         ),
                     )
-                    .child(div().w(px(100.))),
+                    .child(div().min_w(px(100.)).flex().justify_end().when(
+                        key_log::is_recording(cx),
+                        |this| {
+                            this.child(
+                                div()
+                                    .debug_selector(|| "recording-keys".into())
+                                    .text_sm()
+                                    .whitespace_nowrap()
+                                    .text_color(cx.theme().danger)
+                                    .child("Recording keys"),
+                            )
+                        },
+                    )),
             )
     }
 }

@@ -16,8 +16,9 @@ winresource = "0.1"
 # and re-exports it, so GPUI is `gpui_kit::*` and needs no entry of its own. Its
 # `writing` feature brings the spell checker and the word suggestions, and its
 # `fonts` feature embeds Work Sans and JetBrains Mono as variable fonts, the
-# interface and editor fonts.
-gpui-kit = { package = "mhr-gpui-kit", version = "=0.7.15", features = ["writing", "fonts"] }
+# interface and editor fonts. This branch takes GPUI Kit's key-timing branch,
+# whose textareas can record their editing for src/key_log.rs.
+gpui-kit = { package = "mhr-gpui-kit", git = "https://github.com/mesa-hills-research/gpui_kit", branch = "key-timing", features = ["writing", "fonts"] }
 anyhow = "1.0"
 rust-embed = "8.5"
 serde = { version = "1.0", features = ["derive"] }
@@ -63,7 +64,7 @@ windows-registry = "0.6"
 [dev-dependencies]
 # The same GPUI Kit, with GPUI's test harness for tests that type into a real
 # text editor on a fake clock.
-gpui-kit = { package = "mhr-gpui-kit", version = "=0.7.15", features = ["writing", "fonts", "test-support"] }
+gpui-kit = { package = "mhr-gpui-kit", git = "https://github.com/mesa-hills-research/gpui_kit", branch = "key-timing", features = ["writing", "fonts", "test-support"] }
 
 [profile.release]
 opt-level = 3

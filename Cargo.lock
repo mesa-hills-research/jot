@@ -3667,8 +3667,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit"
 version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cf8fb2610e1a984c8b7c18fefb00e48c9da1eaa88bb92af0e1a6ab3f0c51d11"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
 dependencies = [
  "mhr-gpui",
  "mhr-gpui-kit-assets",
@@ -3682,8 +3681,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit-assets"
 version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6933c91661c01f0ab5d3f5109d05b1331a5d97d77abdb410816ff14471199e84"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
 dependencies = [
  "anyhow",
  "gpui-pre-reqwest",
@@ -3697,8 +3695,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit-base"
 version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a3d9ca8f71e55be2a621c948375ae9c36cbc8e9078bd232d6b35ee6bc6e879d"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3740,8 +3737,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit-component"
 version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21e80e58aff8f61f898196fca981a0c8743a29cb0ada5eef3682298eeb81de79"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3787,8 +3783,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit-component-macros"
 version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a236b94e1806e3ede16e8e5d7ac1383f49b999db6c06bb90f321b9b4896bd605"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3799,8 +3794,7 @@ dependencies = [
 [[package]]
 name = "mhr-gpui-kit-writing"
 version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2907153f3ed9964f7fff4633b327a4e6046b9ba878e6173c349f6b7d63e3e8cf"
+source = "git+https://github.com/mesa-hills-research/gpui_kit?branch=key-timing#0842d073eafb616e81b01c92a84e069924042e80"
 dependencies = [
  "anyhow",
  "log",

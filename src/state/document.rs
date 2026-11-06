@@ -143,7 +143,7 @@ impl Document {
                 state = state.default_value(content);
             }
             state.set_spell_checking(options.spell_check, cx);
-            state
+            crate::key_log::record(state, &options.writing, cx)
         });
         let suggestion_feedback = suggestions.follow(&editor_state, cx);
         (editor_state, suggestion_feedback)

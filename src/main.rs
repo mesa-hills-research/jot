@@ -14,6 +14,7 @@ mod components;
 mod file_write;
 mod fonts;
 mod instance;
+mod key_log;
 mod launch;
 mod state;
 mod theme;
@@ -81,6 +82,7 @@ fn main() {
         #[cfg(target_os = "windows")]
         windows_shell::set_app_identity(cx);
         launch::init_kit(cx);
+        key_log::init(cx);
         // Windows and Linux quit with the last window. macOS keeps jot
         // running, as Mac apps do, until Quit.
         cx.set_quit_mode(QuitMode::Default);
