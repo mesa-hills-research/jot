@@ -34,8 +34,9 @@ impl OpenWith {
 }
 
 /// Reads whether jot is in Open with. When it is, but for a jot.exe
-/// somewhere else or for other types, it brings the registration up to
-/// date for this jot: the user asked for jot to be there.
+/// somewhere else, for other types or with another icon for files, it
+/// brings the registration up to date for this jot: the user asked for jot
+/// to be there.
 pub fn check_open_with(cx: &mut App) {
     OpenWith {
         added: false,
@@ -139,9 +140,18 @@ fn installed() -> Result<Option<Installed>> {
         Err(error) if is_missing(&error) => Vec::new(),
         Err(error) => return Err(error),
     };
+    let document_icon = CURRENT_USER
+        .open(open_with::default_icon_key())
+        .and_then(|key| key.get_string(""));
+    let document_icon = match document_icon {
+        Ok(icon) => Some(icon),
+        Err(error) if is_missing(&error) => None,
+        Err(error) => return Err(error),
+    };
     Ok(Some(Installed {
         exe: open_with::exe_in_command(&command),
         extensions,
+        document_icon,
     }))
 }
 

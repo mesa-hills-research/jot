@@ -82,6 +82,8 @@ pub struct Installed {
     pub exe: Option<PathBuf>,
     /// The types Default apps lists for jot.
     pub extensions: Vec<String>,
+    /// The icon of the files the ProgID opens.
+    pub document_icon: Option<String>,
 }
 
 /// The key of the ProgID's command, which names the program. jot is in
@@ -93,6 +95,23 @@ pub fn command_key() -> String {
 /// The key that lists jot's types for Default apps.
 pub fn file_associations_key() -> String {
     format!(r"{CAPABILITIES}\FileAssociations")
+}
+
+/// The key whose default value is the icon of the files the ProgID opens.
+pub fn default_icon_key() -> String {
+    format!(r"{}\DefaultIcon", prog_id_key())
+}
+
+/// The icon Default apps shows beside jot's name. jot.exe's first icon is
+/// jot's own.
+fn app_icon(exe: &Path) -> String {
+    format!("{},0", exe.display())
+}
+
+/// The icon of the files jot opens. build.rs embeds it with resource ID 2,
+/// and a negative number names the icon by its ID rather than its place.
+fn document_icon(exe: &Path) -> String {
+    format!("{},-2", exe.display())
 }
 
 /// The command that opens a file with the jot at `exe`.
@@ -110,16 +129,19 @@ pub fn exe_in_command(command: &str) -> Option<PathBuf> {
 /// The changes that add the jot at `exe` to Open with and Default apps.
 pub fn add(exe: &Path) -> Vec<Op> {
     let command = command(exe);
-    let icon = format!("{},0", exe.display());
+    let document_icon = document_icon(exe);
     let mut ops = Vec::new();
 
-    // Open with's "Choose another app" names jot and its types.
+    // Open with's "Choose another app" names jot and its types. A type
+    // whose default app was chosen by browsing to jot.exe takes its icon
+    // from here, not from the ProgID.
     let app = applications_key(exe);
     ops.push(set(&app, "FriendlyAppName", APP_NAME));
     for extension in EXTENSIONS {
         ops.push(set(format!(r"{app}\SupportedTypes"), extension, ""));
     }
     ops.push(set(format!(r"{app}\shell\open\command"), "", &command));
+    ops.push(set(format!(r"{app}\DefaultIcon"), "", &document_icon));
 
     // Each type's Open with menu lists the ProgID.
     for extension in EXTENSIONS {
@@ -133,18 +155,19 @@ pub fn add(exe: &Path) -> Vec<Op> {
     // Default apps lists jot with its types.
     ops.push(set(CAPABILITIES, "ApplicationName", APP_NAME));
     ops.push(set(CAPABILITIES, "ApplicationDescription", DESCRIPTION));
-    ops.push(set(CAPABILITIES, "ApplicationIcon", &icon));
+    ops.push(set(CAPABILITIES, "ApplicationIcon", &app_icon(exe)));
     for extension in EXTENSIONS {
         ops.push(set(file_associations_key(), extension, PROG_ID));
     }
     ops.push(set(REGISTERED_APPLICATIONS, APP_ID, CAPABILITIES));
 
     // The ProgID comes last, since its command marks jot as added: one
-    // stopped partway can be added again.
+    // stopped partway can be added again. A type whose default app is jot
+    // shows the ProgID's icon.
     let prog_id = prog_id_key();
     ops.push(set(&prog_id, "", TYPE_NAME));
     ops.push(set(&prog_id, "AppUserModelID", APP_ID));
-    ops.push(set(format!(r"{prog_id}\DefaultIcon"), "", &icon));
+    ops.push(set(default_icon_key(), "", &document_icon));
     ops.push(set(command_key(), "", &command));
     ops
 }
@@ -188,6 +211,12 @@ pub fn update(installed: &Installed, exe: &Path) -> Option<Vec<Op>> {
         .exe
         .as_deref()
         .is_some_and(|added| same_path(added, exe));
+    // A jot added before files had an icon of their own gave them its app
+    // icon.
+    let icon_changed = !installed
+        .document_icon
+        .as_deref()
+        .is_some_and(|icon| same_path(Path::new(icon), Path::new(&document_icon(exe))));
     let types_changed = {
         let mut added: Vec<String> = installed
             .extensions
@@ -199,7 +228,7 @@ pub fn update(installed: &Installed, exe: &Path) -> Option<Vec<Op>> {
         supported.sort();
         added != supported
     };
-    if !moved && !types_changed {
+    if !moved && !types_changed && !icon_changed {
         return None;
     }
     let mut ops = remove(installed, exe);
@@ -276,6 +305,7 @@ mod tests {
 
     fn installed(exe: PathBuf) -> Installed {
         Installed {
+            document_icon: Some(document_icon(&exe)),
             exe: Some(exe),
             extensions: EXTENSIONS.iter().map(|ext| ext.to_string()).collect(),
         }
@@ -287,7 +317,10 @@ mod tests {
         assert!(ops.iter().all(|op| matches!(op, Op::Set { .. })));
         let sets = sets(&ops);
         let command = r#""C:\Users\me\Programs\Jot\jot.exe" "%1""#;
-        let icon = r"C:\Users\me\Programs\Jot\jot.exe,0";
+        // Files show the icon with resource ID 2, and Default apps shows
+        // jot's own.
+        let document_icon = r"C:\Users\me\Programs\Jot\jot.exe,-2";
+        let app_icon = r"C:\Users\me\Programs\Jot\jot.exe,0";
         let progid = r"Software\Classes\MesaHillsResearch.Jot.Document";
         let app = r"Software\Classes\Applications\jot.exe";
         let capabilities = r"Software\MesaHillsResearch\Jot\Capabilities";
@@ -298,18 +331,19 @@ mod tests {
                 "AppUserModelID",
                 text("MesaHillsResearch.Jot"),
             ),
-            (format!(r"{progid}\DefaultIcon"), "", text(icon)),
+            (format!(r"{progid}\DefaultIcon"), "", text(document_icon)),
             (format!(r"{progid}\shell\open\command"), "", text(command)),
             (app.into(), "FriendlyAppName", text("Jot")),
             (format!(r"{app}\SupportedTypes"), ".md", text("")),
             (format!(r"{app}\shell\open\command"), "", text(command)),
+            (format!(r"{app}\DefaultIcon"), "", text(document_icon)),
             (
                 r"Software\Classes\.txt\OpenWithProgids".into(),
                 "MesaHillsResearch.Jot.Document",
                 Value::Empty,
             ),
             (capabilities.into(), "ApplicationName", text("Jot")),
-            (capabilities.into(), "ApplicationIcon", text(icon)),
+            (capabilities.into(), "ApplicationIcon", text(app_icon)),
             (
                 format!(r"{capabilities}\FileAssociations"),
                 ".json",
@@ -518,5 +552,29 @@ mod tests {
             ..installed(exe())
         };
         assert!(update(&fewer, &exe()).is_some());
+    }
+
+    #[test]
+    fn a_jot_that_gave_files_its_app_icon_updates_the_registration() {
+        let earlier = Installed {
+            document_icon: Some(r"C:\Users\me\Programs\Jot\jot.exe,0".into()),
+            ..installed(exe())
+        };
+        let ops = update(&earlier, &exe()).unwrap();
+        let mut expected = remove(&earlier, &exe());
+        expected.extend(add(&exe()));
+        assert_eq!(ops, expected);
+        assert!(ops.contains(&Op::Set {
+            key: default_icon_key(),
+            name: String::new(),
+            value: text(r"C:\Users\me\Programs\Jot\jot.exe,-2"),
+        }));
+
+        // So does a ProgID without an icon.
+        let without = Installed {
+            document_icon: None,
+            ..installed(exe())
+        };
+        assert!(update(&without, &exe()).is_some());
     }
 }
