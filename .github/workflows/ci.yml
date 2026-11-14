@@ -71,3 +71,24 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --locked
+      # The app bundle as docs/packaging.md builds it, from the test build.
+      - name: App bundle
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          plutil -lint packaging/macos/Info.plist
+          for icon in jot jot-document; do
+            iconutil --convert iconset --output "$RUNNER_TEMP/$icon.iconset" "packaging/macos/$icon.icns"
+            ls "$RUNNER_TEMP/$icon.iconset"
+          done
+          app="$RUNNER_TEMP/Jot.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp target/debug/jot "$app/Contents/MacOS/"
+          cp packaging/macos/Info.plist "$app/Contents/"
+          cp packaging/macos/jot.icns packaging/macos/jot-document.icns "$app/Contents/Resources/"
+          codesign --force --sign - "$app"
+          codesign --verify --strict --verbose "$app"
+      - name: Desktop entry
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get install -y desktop-file-utils
+          desktop-file-validate packaging/linux/MesaHillsResearch.Jot.desktop

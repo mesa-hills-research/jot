@@ -41,6 +41,9 @@ cd jot
 cargo run --release
 ```
 
+[Installing jot as an app](docs/packaging.md) covers the app bundle on macOS and the desktop entry
+on Linux, which give jot its icon and a place in Open With.
+
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or

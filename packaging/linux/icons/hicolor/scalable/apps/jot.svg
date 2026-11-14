@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="jot">
+  <title>jot</title>
+  <rect width="64" height="64" rx="14" ry="14" fill="#D8B76C"/>
+  <g transform="translate(0 0) scale(1.00000)">
+    <path fill="#F5F2EA" fill-rule="evenodd" d="M16 8L36 8L36 20L48 20L48 56L16 56ZM20 12H28V16H20V12ZM20 28H44V32H20V28ZM20 36H36V40H20V36ZM20 44H40V48H20V44Z"/>
+    <path fill="#7A5212" d="M40 8L40 16L48 16Z"/>
+  </g>
+</svg>

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Jot
+Comment=A fast, native text editor
+Exec=jot %F
+Icon=jot
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/plain;text/markdown;
+StartupWMClass=MesaHillsResearch.Jot

@@ -22,8 +22,9 @@ use crate::instance::Kind;
 use std::path::Path;
 
 /// The AppUserModelID that Windows groups jot's windows by, under one
-/// taskbar button with one jump list.
-pub const APP_ID: &str = "MesaHillsResearch.Jot";
+/// taskbar button with one jump list. It is the app ID the windows report
+/// on Linux too.
+pub const APP_ID: &str = crate::chrome::APP_ID;
 
 /// jot's name wherever Windows shows it.
 pub const APP_NAME: &str = "Jot";

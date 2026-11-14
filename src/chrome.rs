@@ -6,6 +6,10 @@ use crate::state::AppState;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
+/// The ID jot's windows report. Linux compositors group the windows by it
+/// and give them the name and icon of the .desktop file it names.
+pub const APP_ID: &str = "MesaHillsResearch.Jot";
+
 /// A jot window: a transparent title bar that jot draws itself, with the
 /// macOS traffic lights at (9, 9) and the drag left to the app, as GPUI Kit's
 /// `TitleBar` expects.
@@ -30,6 +34,7 @@ pub fn window_options(cx: &App) -> WindowOptions {
         // Windows. Left unset, KDE, Sway and X11 add a system title bar above
         // jot's own.
         window_decorations: Some(WindowDecorations::Client),
+        app_id: Some(APP_ID.into()),
         kind: WindowKind::Normal,
         ..TitleBar::window_options()
     }
@@ -107,4 +112,24 @@ pub fn quit_step(cx: &mut App) {
             .ok();
     }
     cx.quit();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::APP_ID;
+    use std::path::Path;
+
+    #[test]
+    fn the_linux_desktop_entry_is_named_after_the_app_id() {
+        let entry = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("packaging/linux")
+            .join(format!("{APP_ID}.desktop"));
+        let entry = std::fs::read_to_string(&entry).unwrap();
+        // X11 window managers match the class the windows report.
+        assert!(
+            entry
+                .lines()
+                .any(|line| line == format!("StartupWMClass={APP_ID}"))
+        );
+    }
 }
