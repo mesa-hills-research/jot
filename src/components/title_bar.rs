@@ -68,8 +68,8 @@ impl Render for JotTitleBar {
                             .items_center()
                             .child(
                                 Icon::new(Icon::empty())
-                                    .path("icons/logo/jot-logo-grand-hotel.svg")
-                                    .with_size(px(5.5))
+                                    .path("icons/logo/jot-logo.svg")
+                                    .with_size(px(14.))
                                     .text_color(cx.theme().foreground),
                             )
                             .when(!cfg!(target_os = "macos"), |this| {
