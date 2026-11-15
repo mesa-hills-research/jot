@@ -1,8 +1,18 @@
-# jot
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mesa-hills-research/jot/main/assets/readme-header-dark.svg">
+    <img src="https://raw.githubusercontent.com/mesa-hills-research/jot/main/assets/readme-header-light.svg" alt="jot" width="164">
+  </picture>
+</h1>
 
 jot is a fast, native text editor written in Rust on [GPUI](https://www.gpui.rs), for Windows,
 macOS and Linux. It fills the space between a simple editor like Notepad and a word processor:
 your files stay plain text, and jot helps you write them.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mesa-hills-research/jot/main/docs/images/jot-dark.png">
+  <img src="https://raw.githubusercontent.com/mesa-hills-research/jot/main/docs/images/jot-light.png" alt="jot with three files open in tabs and its spelling menu offering corrections for a misspelled word." width="830">
+</picture>
 
 - Spell checking as you type, with suggestions and Add to Dictionary
 - Word completion that learns from your own writing, stored on your computer, and by default
