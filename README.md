@@ -26,7 +26,7 @@ your files stay plain text, and jot helps you write them.
 - 72 color themes from GPUI Kit, light or dark as your system is until you choose one
 - New from Template, which starts a new document from any file
 
-Words you add to the dictionary go to `user-dictionary.txt` in jot's settings folder:
+Words you add to the dictionary go to `user-dictionary.txt` in jot's settings folder, which is
 `%APPDATA%\jot` on Windows, `~/Library/Application Support/jot` on macOS and `~/.config/jot` on
 Linux.
 
@@ -38,12 +38,12 @@ its spell checker, word suggestions and fonts. Cargo fetches the kit and GPUI fr
 
 You need [Rust](https://rustup.rs/) and the tools GPUI builds with:
 
-- **Windows**: Visual Studio Build Tools with the C++ workload and the Windows SDK
-- **macOS**: Xcode
-- **Linux**: the X11, Wayland and Vulkan development packages, as listed in Zed's
+- on Windows, Visual Studio Build Tools with the C++ workload and the Windows SDK
+- on macOS, Xcode
+- on Linux, the X11, Wayland and Vulkan development packages, as listed in Zed's
   [Linux build guide](https://zed.dev/docs/development/linux)
 
-Then:
+Then clone and run it:
 
 ```sh
 git clone https://github.com/mesa-hills-research/jot
